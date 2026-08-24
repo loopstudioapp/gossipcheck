@@ -18,7 +18,7 @@ const experiences = [
 ];
 
 const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'unconfigured' ? 'Needs setup' : status;
-const evidenceLabel = (item: EvidenceRecord) => item.reasons.includes('Imported by you') ? 'Imported' : item.confidence >= 85 ? 'Strong match' : 'Potential match';
+const evidenceLabel = (item: EvidenceRecord) => item.reasons.includes('Example report') ? 'Example result' : item.reasons.includes('Imported by you') ? 'Imported' : item.confidence >= 85 ? 'Strong match' : 'Potential match';
 
 export default function CheckFlow({ initialView = 'onboarding' }: { initialView?: AppView }) {
   const [view, setView] = useState<AppView>(initialView);
@@ -38,11 +38,17 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     fetch('/api/scans').then(async (response) => {
       const data = await response.json() as { scans?: ScanRecord[] };
       if (response.ok && data.scans) {
-        setHistory(data.scans);
+        let scans = data.scans;
         if (initialView === 'report') {
           const requestedId = new URL(window.location.href).searchParams.get('scan_id');
-          setScan(requestedId ? data.scans.find((item) => item.id === requestedId) || null : data.scans[0] || null);
+          if (!requestedId && scans.length === 0) {
+            const demoResponse = await fetch('/api/scans/demo', { method: 'POST' });
+            const demoData = await demoResponse.json() as { scan?: ScanRecord };
+            if (demoResponse.ok && demoData.scan) scans = [demoData.scan];
+          }
+          setScan(requestedId ? scans.find((item) => item.id === requestedId) || null : scans[0] || null);
         }
+        setHistory(scans);
       }
       setHistoryLoaded(true);
     }).catch(() => setHistoryLoaded(true));
@@ -151,6 +157,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const visibleEvidence = useMemo(() => scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || [], [scan, filter]);
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
   const publicEvidence = scan?.evidence.filter((item) => item.source === 'Public web') || [];
+  const isExampleReport = scan?.evidence.some((item) => item.reasons.includes('Example report')) || false;
 
   if (view === 'onboarding') return (
     <main className="funnel-page">
@@ -222,8 +229,9 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       </aside>
 
       <section className="report-main">
-        <header className="report-topbar"><BrandLink /><span>PRIVATE REPUTATION REPORT</span><button type="button" onClick={() => setImportOpen(true)}>＋ Add Tea evidence</button></header>
-        <div className={`report-alert ${teaEvidence.length ? 'found' : ''}`}><span>{teaEvidence.length ? '!' : 'i'}</span><div><h3>{teaEvidence.length ? 'Potential Tea evidence collected' : 'Tea provider needs authorized access'}</h3><p>{teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : 'No live Tea results were fabricated. Connect a provider you are allowed to use or import evidence you already possess.'}</p></div></div>
+        <header className="report-topbar"><BrandLink /><span>{isExampleReport ? 'EXAMPLE REPUTATION REPORT' : 'PRIVATE REPUTATION REPORT'}</span><button type="button" onClick={isExampleReport ? startOver : () => setImportOpen(true)}>{isExampleReport ? 'Start your check →' : '＋ Add Tea evidence'}</button></header>
+        {isExampleReport && <div className="report-example-note"><div><b>Example report</b><span>This fictional data shows how a completed GossipCheck report is organized. It is not a real search result.</span></div><button type="button" onClick={startOver}>Run your own check →</button></div>}
+        <div className={`report-alert ${teaEvidence.length ? 'found' : ''}`}><span>{teaEvidence.length ? '!' : 'i'}</span><div><h3>{isExampleReport ? 'Example Tea evidence collected' : teaEvidence.length ? 'Potential Tea evidence collected' : 'Tea provider needs authorized access'}</h3><p>{isExampleReport ? 'These sample items demonstrate the review experience. A real report only shows evidence returned by configured providers or imported by you.' : teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : 'No live Tea results were fabricated. Connect a provider you are allowed to use or import evidence you already possess.'}</p></div></div>
 
         <div className="report-heading-row"><div><span>{scan.evidence.length} results found</span><h1>{filter === 'All' ? 'Potential matches' : `${filter} results`}</h1></div><small>Scan {scan.id.slice(0, 8)} · {sourceStatusLabel(scan.status)}</small></div>
 

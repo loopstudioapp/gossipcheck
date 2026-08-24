@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000/check](http://localhost:3000/check) for onboarding. Completed scans open at `http://localhost:3000/report?scan_id=...`; visiting [http://localhost:3000/report](http://localhost:3000/report) without an ID loads the latest report in the current private session. Vinext/Miniflare provides local D1 and R2 storage under `.wrangler/`.
+Open [http://localhost:3000/check](http://localhost:3000/check) for onboarding. Completed scans open at `http://localhost:3000/report?scan_id=...`; visiting [http://localhost:3000/report](http://localhost:3000/report) without an ID loads the latest report in the current private session. If the browser has no saved history, the bare route creates a clearly labeled fictional example report so the full report interface is immediately reviewable. Vinext/Miniflare provides local D1 and R2 storage under `.wrangler/`.
 
 ## Backend
 
@@ -20,7 +20,7 @@ Open [http://localhost:3000/check](http://localhost:3000/check) for onboarding. 
 - Optional onboarding reference photos are also stored in R2 and protected by the same session ownership check.
 - The Tea adapter is deliberately credential-gated. Set `TEA_AUTHORIZED_ENDPOINT` and `TEA_AUTHORIZED_TOKEN` only for a source you are contractually and technically allowed to query.
 - Set `BRAVE_SEARCH_API_KEY` to enable the public-web provider.
-- Without provider credentials, scans still persist and clearly report the source as unconfigured; users can import Tea evidence they lawfully possess. No fake matches are generated.
+- Without provider credentials, real scans still persist and clearly report the source as unconfigured; users can import Tea evidence they lawfully possess. Real searches never generate fake matches. The bare `/report` route may create an explicitly labeled fictional example only when the current browser has no report history.
 
 Copy `.env.example` to `.env.local` to configure optional providers. The provider adapter contract is implemented in `lib/providers.ts`.
 

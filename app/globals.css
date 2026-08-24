@@ -666,6 +666,22 @@ footer div { display: flex; gap: 20px; }
 .report-route-actions a { padding: 14px 20px; border: 2px solid var(--ink); border-radius: 999px; background: var(--light); color: var(--ink); box-shadow: 4px 4px 0 var(--coral); font-size: 12px; font-weight: 800; }
 .report-route-actions a:last-child { background: var(--ink); color: white; box-shadow-color: var(--lime); }
 
+.report-example-note {
+  align-items: center;
+  background: #eefbd9;
+  border: 1.5px solid var(--ink);
+  border-radius: 18px;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin: 24px 0 22px;
+  padding: 16px 18px;
+}
+.report-example-note div { display: grid; gap: 3px; }
+.report-example-note b { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; }
+.report-example-note span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.report-example-note button { background: var(--ink); border: 0; border-radius: 999px; color: white; cursor: pointer; flex: 0 0 auto; font-size: 12px; font-weight: 800; padding: 12px 17px; }
+
 .report-page { grid-template-columns: 315px 1fr; background: var(--paper); }
 .report-sidebar { padding: 28px 22px; gap: 18px; border-right: 2px solid var(--ink); background: var(--light); }
 .report-sidebar > .funnel-brand { margin-bottom: 12px; }
@@ -757,4 +773,5 @@ footer div { display: flex; gap: 20px; }
   .report-topbar .brand-mark { display: inline-block; transform: scale(.82); transform-origin: left center; margin-right: 2px; }
   .report-alert { grid-template-columns: 39px 1fr; padding: 15px; }
   .report-alert > span { width: 38px; height: 38px; }
+  .report-example-note { align-items: flex-start; flex-direction: column; gap: 13px; }
 }
