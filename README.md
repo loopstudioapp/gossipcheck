@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000/check](http://localhost:3000/check). Vinext/Miniflare provides local D1 and R2 storage under `.wrangler/`.
+Open [http://localhost:3000/check](http://localhost:3000/check) for onboarding. Completed scans open at `http://localhost:3000/report?scan_id=...`; visiting [http://localhost:3000/report](http://localhost:3000/report) without an ID loads the latest report in the current private session. Vinext/Miniflare provides local D1 and R2 storage under `.wrangler/`.
 
 ## Backend
 

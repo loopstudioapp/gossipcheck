@@ -20,13 +20,14 @@ const experiences = [
 const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'unconfigured' ? 'Needs setup' : status;
 const evidenceLabel = (item: EvidenceRecord) => item.reasons.includes('Imported by you') ? 'Imported' : item.confidence >= 85 ? 'Strong match' : 'Potential match';
 
-export default function CheckFlow() {
-  const [view, setView] = useState<AppView>('onboarding');
+export default function CheckFlow({ initialView = 'onboarding' }: { initialView?: AppView }) {
+  const [view, setView] = useState<AppView>(initialView);
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
   const [scanStage, setScanStage] = useState(0);
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [filter, setFilter] = useState<Filter>('All');
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRecord | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -36,9 +37,16 @@ export default function CheckFlow() {
   useEffect(() => {
     fetch('/api/scans').then(async (response) => {
       const data = await response.json() as { scans?: ScanRecord[] };
-      if (response.ok && data.scans) setHistory(data.scans);
-    }).catch(() => undefined);
-  }, []);
+      if (response.ok && data.scans) {
+        setHistory(data.scans);
+        if (initialView === 'report') {
+          const requestedId = new URL(window.location.href).searchParams.get('scan_id');
+          setScan(requestedId ? data.scans.find((item) => item.id === requestedId) || null : data.scans[0] || null);
+        }
+      }
+      setHistoryLoaded(true);
+    }).catch(() => setHistoryLoaded(true));
+  }, [initialView]);
 
   const update = <K extends keyof typeof profile>(key: K, value: typeof profile[K]) => {
     setProfile((current) => ({ ...current, [key]: value }));
@@ -86,9 +94,7 @@ export default function CheckFlow() {
 
       const remaining = Math.max(0, 2400 - (Date.now() - started));
       await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      setScan(completedScan);
-      setHistory((current) => [completedScan, ...current.filter((item) => item.id !== completedScan.id)]);
-      setView('report');
+      window.location.assign(`/report?scan_id=${encodeURIComponent(completedScan.id)}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The check could not be completed.');
       setView('onboarding');
@@ -139,8 +145,7 @@ export default function CheckFlow() {
   };
 
   const startOver = () => {
-    setView('onboarding'); setStep(1); setScan(null); setFilter('All'); setSelectedEvidence(null); setImportOpen(false); setError('');
-    setProfile({ firstName: '', age: '', city: '', instagram: '', experiences: [], photo: null });
+    window.location.assign('/check');
   };
 
   const visibleEvidence = useMemo(() => scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || [], [scan, filter]);
@@ -150,7 +155,7 @@ export default function CheckFlow() {
   if (view === 'onboarding') return (
     <main className="funnel-page">
       <header className="funnel-header">
-        <button type="button" onClick={() => step > 1 ? setStep((current) => current - 1) : history[0] ? (setScan(history[0]), setView('report')) : window.history.back()} aria-label="Back">←</button>
+        <button type="button" onClick={() => step > 1 ? setStep((current) => current - 1) : history[0] ? window.location.assign(`/report?scan_id=${encodeURIComponent(history[0].id)}`) : window.history.back()} aria-label="Back">←</button>
         <BrandLink />
         <div><b>{String(step).padStart(2, '0')}</b><span>/{totalSteps}</span></div>
       </header>
@@ -193,7 +198,7 @@ export default function CheckFlow() {
     </main>
   );
 
-  if (!scan) return null;
+  if (!scan) return historyLoaded ? <NoReport /> : <ReportLoading />;
   return (
     <main className="report-page">
       <aside className="report-sidebar">
@@ -212,7 +217,7 @@ export default function CheckFlow() {
           <button className={filter === 'Public web' ? 'active web' : ''} onClick={() => setFilter(filter === 'Public web' ? 'All' : 'Public web')} type="button"><span><b>Public web</b><small>Indexed candidates</small></span><i>{publicEvidence.length}</i></button>
         </section>
         <section className="alerts-card"><h3>🔔 Source alerts</h3><p>Scheduled notifications require a delivery provider. Your current report stays saved locally.</p><button type="button" disabled>Alerts not configured</button></section>
-        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); setFilter('All'); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
+        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); setFilter('All'); window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(item.id)}`); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
         <button className="new-search" type="button" onClick={startOver}>＋ New self-search</button>
       </aside>
 
@@ -243,6 +248,14 @@ export default function CheckFlow() {
 
 function FunnelStep({ icon, title, subtitle, children }: { icon: string; title: string; subtitle: string; children: React.ReactNode }) {
   return <div className="funnel-step"><span className="step-emoji">{icon}</span><h1>{title}</h1><p className="step-subtitle">{subtitle}</p><div className="step-content">{children}</div></div>;
+}
+
+function ReportLoading() {
+  return <main className="report-route-state"><BrandLink /><div className="search-orbit"><i /><i /><span>⌕</span></div><h1>Loading your report…</h1><p>Retrieving the latest scan from this private session.</p></main>;
+}
+
+function NoReport() {
+  return <main className="report-route-state"><BrandLink /><span className="step-emoji">⌕</span><h1>Report unavailable.</h1><p>No saved report matching this URL belongs to the current private session.</p><div className="report-route-actions"><a href="/report">Open latest report</a><a href="/check">Start a new check →</a></div></main>;
 }
 
 function BrandLink() {
