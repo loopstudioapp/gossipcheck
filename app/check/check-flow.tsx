@@ -151,7 +151,7 @@ export default function CheckFlow() {
     <main className="funnel-page">
       <header className="funnel-header">
         <button type="button" onClick={() => step > 1 ? setStep((current) => current - 1) : history[0] ? (setScan(history[0]), setView('report')) : window.history.back()} aria-label="Back">←</button>
-        <a className="funnel-brand" href="/">gossipcheck<span>.app</span></a>
+        <BrandLink />
         <div><b>{String(step).padStart(2, '0')}</b><span>/{totalSteps}</span></div>
       </header>
       <div className="funnel-progress"><i style={{ width: `${step / totalSteps * 100}%` }} /></div>
@@ -181,7 +181,7 @@ export default function CheckFlow() {
 
   if (view === 'searching') return (
     <main className="searching-page">
-      <a className="funnel-brand" href="/">gossipcheck<span>.app</span></a>
+      <BrandLink />
       <section>
         <div className="search-orbit"><i /><i /><span>⌕</span></div>
         <h1>Searching for {profile.firstName}</h1>
@@ -197,7 +197,7 @@ export default function CheckFlow() {
   return (
     <main className="report-page">
       <aside className="report-sidebar">
-        <a className="funnel-brand" href="/">gossipcheck<span>.app</span></a>
+        <BrandLink />
         <section className="monitor-card">
           <span>● Monitoring profile</span>
           <div className="profile-row">
@@ -217,7 +217,7 @@ export default function CheckFlow() {
       </aside>
 
       <section className="report-main">
-        <header className="report-topbar"><a className="funnel-brand" href="/">gossipcheck<span>.app</span></a><button type="button" onClick={() => setImportOpen(true)}>＋ Add Tea evidence</button></header>
+        <header className="report-topbar"><BrandLink /><span>PRIVATE REPUTATION REPORT</span><button type="button" onClick={() => setImportOpen(true)}>＋ Add Tea evidence</button></header>
         <div className={`report-alert ${teaEvidence.length ? 'found' : ''}`}><span>{teaEvidence.length ? '!' : 'i'}</span><div><h3>{teaEvidence.length ? 'Potential Tea evidence collected' : 'Tea provider needs authorized access'}</h3><p>{teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : 'No live Tea results were fabricated. Connect a provider you are allowed to use or import evidence you already possess.'}</p></div></div>
 
         <div className="report-heading-row"><div><span>{scan.evidence.length} results found</span><h1>{filter === 'All' ? 'Potential matches' : `${filter} results`}</h1></div><small>Scan {scan.id.slice(0, 8)} · {sourceStatusLabel(scan.status)}</small></div>
@@ -243,6 +243,10 @@ export default function CheckFlow() {
 
 function FunnelStep({ icon, title, subtitle, children }: { icon: string; title: string; subtitle: string; children: React.ReactNode }) {
   return <div className="funnel-step"><span className="step-emoji">{icon}</span><h1>{title}</h1><p className="step-subtitle">{subtitle}</p><div className="step-content">{children}</div></div>;
+}
+
+function BrandLink() {
+  return <a className="brand funnel-brand" href="/" aria-label="GossipCheck home"><span className="brand-mark" aria-hidden="true"><span className="bubble bubble-back" /><span className="bubble bubble-front">✓</span></span><span>gossipcheck</span><b>.app</b></a>;
 }
 
 function Tip({ children }: { children: React.ReactNode }) { return <p className="funnel-tip"><b>Good to know</b>{children}</p>; }
