@@ -1,0 +1,79 @@
+import { NextResponse } from 'next/server';
+import type { CreateScanRequest } from '../../../lib/backend-types';
+import { database, ensureSchema, getScans } from '../../../lib/database';
+import { runProviders } from '../../../lib/providers';
+import { sessionFor } from '../../../lib/session';
+
+export const dynamic = 'force-dynamic';
+
+const clean = (value: unknown, max: number) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : '';
+
+export async function GET(request: Request) {
+  try {
+    const session = await sessionFor(request);
+    return session.attach(NextResponse.json({ scans: await getScans(session.id) }));
+  } catch (error) {
+    console.error('Could not list scans', error);
+    return NextResponse.json({ error: 'The local scan database is unavailable.' }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  let body: Partial<CreateScanRequest>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
+  }
+
+  const firstName = clean(body.firstName, 80);
+  const city = clean(body.city, 120);
+  const age = Number(body.age);
+  const usernames = Array.isArray(body.usernames)
+    ? body.usernames.map((value) => clean(value, 80)).filter(Boolean).slice(0, 6)
+    : [];
+
+  if (!firstName || !city || !Number.isInteger(age) || age < 18 || age > 99) {
+    return NextResponse.json({ error: 'Enter a valid name, city, and age between 18 and 99.' }, { status: 400 });
+  }
+  if (body.selfSearchConfirmed !== true) {
+    return NextResponse.json({ error: 'GossipCheck is limited to searches about yourself.' }, { status: 403 });
+  }
+
+  try {
+    await ensureSchema();
+    const session = await sessionFor(request);
+    const now = new Date().toISOString();
+    const profileId = crypto.randomUUID();
+    const scanId = crypto.randomUUID();
+    const profile: CreateScanRequest = { firstName, city, age, usernames, selfSearchConfirmed: true };
+
+    await database().batch([
+      database().prepare(`INSERT INTO profiles (id, session_id, first_name, age, city, usernames_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(profileId, session.id, firstName, age, city, JSON.stringify(usernames), now, now),
+      database().prepare(`INSERT INTO scans (id, session_id, profile_id, status, created_at, started_at) VALUES (?, ?, ?, 'running', ?, ?)`)
+        .bind(scanId, session.id, profileId, now, now),
+      database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Tea', 'queued', 'Waiting for Tea provider.')`)
+        .bind(crypto.randomUUID(), scanId),
+      database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Public web', 'queued', 'Waiting for public web provider.')`)
+        .bind(crypto.randomUUID(), scanId),
+    ]);
+
+    try {
+      await runProviders(scanId, session.id, profile);
+      const completedAt = new Date().toISOString();
+      await database().prepare(`UPDATE scans SET status = 'complete', completed_at = ? WHERE id = ? AND session_id = ?`)
+        .bind(completedAt, scanId, session.id).run();
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 300) : 'Scan failed.';
+      await database().prepare(`UPDATE scans SET status = 'failed', error = ?, completed_at = ? WHERE id = ? AND session_id = ?`)
+        .bind(message, new Date().toISOString(), scanId, session.id).run();
+    }
+
+    const [scan] = await getScans(session.id, scanId);
+    return session.attach(NextResponse.json({ scan }, { status: 201 }));
+  } catch (error) {
+    console.error('Could not create scan', error);
+    return NextResponse.json({ error: 'The scan could not be created.' }, { status: 500 });
+  }
+}
