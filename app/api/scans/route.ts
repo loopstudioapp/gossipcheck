@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { CreateScanRequest } from '../../../lib/backend-types';
 import { database, ensureSchema, getScans } from '../../../lib/database';
-import { runProviders } from '../../../lib/providers';
 import { sessionFor } from '../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -49,29 +48,20 @@ export async function POST(request: Request) {
     const accessToken = `${crypto.randomUUID()}${crypto.randomUUID()}`;
     const tokenDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(accessToken));
     const accessTokenHash = [...new Uint8Array(tokenDigest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    const profile: CreateScanRequest = { firstName, city, age, usernames, selfSearchConfirmed: true };
+    const faceSearchConfirmed = body.faceSearchConfirmed === true;
 
     await database().batch([
       database().prepare(`INSERT INTO profiles (id, session_id, first_name, age, city, usernames_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(profileId, session.id, firstName, age, city, JSON.stringify(usernames), now, now),
-      database().prepare(`INSERT INTO scans (id, session_id, profile_id, access_token_hash, status, created_at, started_at) VALUES (?, ?, ?, ?, 'running', ?, ?)`)
-        .bind(scanId, session.id, profileId, accessTokenHash, now, now),
+      database().prepare(`INSERT INTO scans (id, session_id, profile_id, access_token_hash, face_search_consent, status, created_at) VALUES (?, ?, ?, ?, ?, 'queued', ?)`)
+        .bind(scanId, session.id, profileId, accessTokenHash, faceSearchConfirmed ? 1 : 0, now),
       database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Tea', 'queued', 'Waiting for Tea provider.')`)
         .bind(crypto.randomUUID(), scanId),
       database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Public web', 'queued', 'Waiting for public web provider.')`)
         .bind(crypto.randomUUID(), scanId),
+      database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Face search', 'queued', 'Waiting for an optional reference photo.')`)
+        .bind(crypto.randomUUID(), scanId),
     ]);
-
-    try {
-      await runProviders(scanId, session.id, profile);
-      const completedAt = new Date().toISOString();
-      await database().prepare(`UPDATE scans SET status = 'complete', completed_at = ? WHERE id = ? AND session_id = ?`)
-        .bind(completedAt, scanId, session.id).run();
-    } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 300) : 'Scan failed.';
-      await database().prepare(`UPDATE scans SET status = 'failed', error = ?, completed_at = ? WHERE id = ? AND session_id = ?`)
-        .bind(message, new Date().toISOString(), scanId, session.id).run();
-    }
 
     const [scan] = await getScans(session.id, scanId);
     return session.attach(NextResponse.json({ scan, accessToken }, { status: 201 }));

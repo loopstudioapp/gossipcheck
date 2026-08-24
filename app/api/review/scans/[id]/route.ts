@@ -57,9 +57,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ];
     if (outcome !== 'not_found') {
       writes.push(database().prepare(`
-        INSERT INTO evidence (id, scan_id, session_id, source, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, mime_type, created_at)
-        VALUES (?, ?, ?, 'Tea', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(evidenceId, scanId, owner.session_id, title, excerpt, sourceUrl || null, outcome === 'found' ? 90 : 65, JSON.stringify(['Analyst reviewed', outcome === 'found' ? 'Potential identity match' : 'Needs customer verification']), capturedAt, objectKey, file?.type || null, now));
+        INSERT INTO evidence (id, scan_id, session_id, source, kind, provider, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, mime_type, created_at)
+        VALUES (?, ?, ?, 'Tea', 'manual_import', 'Authorized analyst', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(evidenceId, scanId, owner.session_id, title, excerpt, sourceUrl || null, outcome === 'found' ? 80 : 55, JSON.stringify(['Analyst reviewed', outcome === 'found' ? 'Potential identity match' : 'Needs customer verification', 'Post claims remain unverified user content']), capturedAt, objectKey, file?.type || null, now));
     }
     await database().batch(writes);
 

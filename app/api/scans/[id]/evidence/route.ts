@@ -56,9 +56,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     try {
       await database().prepare(`
-        INSERT INTO evidence (id, scan_id, session_id, source, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, mime_type, created_at)
-        VALUES (?, ?, ?, 'Tea', ?, ?, ?, 100, ?, ?, ?, ?, ?)
-      `).bind(evidenceId, scanId, effectiveSessionId, title, excerpt, sourceUrl || null, JSON.stringify(['Imported by you', file ? 'Screenshot attached' : 'Source details supplied']), capturedAtInput || now, objectKey, file?.type || null, now).run();
+        INSERT INTO evidence (id, scan_id, session_id, source, kind, provider, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, mime_type, created_at)
+        VALUES (?, ?, ?, 'Tea', 'manual_import', 'User import', ?, ?, ?, 0, ?, ?, ?, ?, ?)
+      `).bind(evidenceId, scanId, effectiveSessionId, title, excerpt, sourceUrl || null, JSON.stringify(['Imported by you', file ? 'Screenshot attached' : 'Source details supplied', 'Identity confidence not calculated']), capturedAtInput || now, objectKey, file?.type || null, now).run();
     } catch (error) {
       if (objectKey) await evidenceBucket().delete(objectKey);
       throw error;

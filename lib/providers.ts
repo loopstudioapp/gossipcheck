@@ -1,14 +1,34 @@
-import type { CreateScanRequest, SourceName } from './backend-types';
-import { database, runtimeEnv } from './database';
+import type { CreateScanRequest, EvidenceKind, SourceName } from './backend-types';
+import { database, evidenceBucket, runtimeEnv } from './database';
+
+type ProviderComment = {
+  externalId?: string;
+  author: string;
+  text: string;
+  postedAt?: string;
+  reactions: number;
+};
 
 type ProviderEvidence = {
   source: SourceName;
+  kind: EvidenceKind;
+  provider: string;
+  externalId?: string;
   title: string;
   excerpt: string;
   sourceUrl?: string;
   confidence: number;
+  providerScore?: number;
   reasons: string[];
   capturedAt?: string;
+  subjectAge?: number;
+  subjectLocation?: string;
+  commentCount?: number;
+  redFlags?: number;
+  greenFlags?: number;
+  metadata?: Record<string, unknown>;
+  comments?: ProviderComment[];
+  image?: { bytes: Uint8Array; mimeType: string };
 };
 
 type ProviderResult = {
@@ -17,114 +37,286 @@ type ProviderResult = {
   evidence: ProviderEvidence[];
 };
 
-const cleanText = (value: unknown, max = 600) => typeof value === 'string' ? value.trim().slice(0, max) : '';
-const setting = (name: 'BRAVE_SEARCH_API_KEY' | 'TEA_AUTHORIZED_ENDPOINT' | 'TEA_AUTHORIZED_TOKEN') =>
-  runtimeEnv[name] || process.env[name];
+type ProviderDefinition = {
+  name: SourceName;
+  run: (scanId: string, profile: CreateScanRequest) => Promise<ProviderResult>;
+};
 
-async function teaProvider(profile: CreateScanRequest): Promise<ProviderResult> {
+const cleanText = (value: unknown, max = 600) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : '';
+const numberOrNull = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : null;
+const integer = (value: unknown, fallback = 0) => Math.max(0, Math.round(numberOrNull(value) ?? fallback));
+const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
+const setting = (name: string) => (runtimeEnv as unknown as Record<string, string | undefined>)[name] || process.env[name];
+const normalized = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const containsTerm = (text: string, term: string) => ` ${normalized(text)} `.includes(` ${normalized(term)} `);
+
+function safeUrl(value: unknown) {
+  const candidate = cleanText(value, 1000);
+  if (!candidate) return undefined;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => cleanText(item, 120)).filter(Boolean) : [];
+}
+
+function locationText(value: unknown) {
+  if (typeof value === 'string') return cleanText(value, 160);
+  const location = asRecord(value);
+  return cleanText(location.name || location.city || location.label, 160);
+}
+
+function commentsFrom(value: unknown): ProviderComment[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).map((entry) => {
+    const item = asRecord(entry);
+    const authorRecord = asRecord(item.author || item.user);
+    return {
+      externalId: cleanText(item.commentId || item.id, 240) || undefined,
+      author: cleanText(authorRecord.name || authorRecord.username || item.author, 100) || 'Tea user',
+      text: cleanText(item.text || item.content || item.caption, 1200),
+      postedAt: cleanText(item.postedAt || item.createdAt, 50) || undefined,
+      reactions: integer(item.reactions || item.reactionCount || item.likes),
+    };
+  }).filter((comment) => comment.text);
+}
+
+function decodeImage(value: unknown): ProviderEvidence['image'] | undefined {
+  const input = cleanText(value, 3_000_000);
+  if (!input) return undefined;
+  const match = input.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  const raw = match ? match[2] : input;
+  const mimeType = match?.[1] || 'image/jpeg';
+  try {
+    const binary = atob(raw);
+    if (!binary.length || binary.length > 2_500_000) return undefined;
+    return { bytes: Uint8Array.from(binary, (character) => character.charCodeAt(0)), mimeType };
+  } catch {
+    return undefined;
+  }
+}
+
+function identitySignals(profile: CreateScanRequest, item: Record<string, unknown>) {
+  const title = cleanText(item.subject || item.title, 200);
+  const excerpt = cleanText(item.content || item.caption || item.excerpt || item.description, 1200);
+  const haystack = `${title} ${excerpt}`;
+  const itemAge = numberOrNull(item.age ?? item.estimatedAge ?? item.userAge);
+  const itemLocation = locationText(item.location || item.city);
+  const nameMatch = containsTerm(haystack, profile.firstName);
+  const usernameMatch = profile.usernames.some((username) => containsTerm(haystack, username.replace(/^@/, '')));
+  const locationMatch = Boolean(itemLocation && containsTerm(itemLocation, profile.city));
+  const ageDelta = itemAge === null ? null : Math.abs(itemAge - profile.age);
+  const faceScore = numberOrNull(item.faceScore ?? item.faceMatchScore);
+  const reasons: string[] = [];
+  let score = 5;
+
+  if (nameMatch) { score += 25; reasons.push('First name appears in the post'); }
+  if (ageDelta === 0) { score += 20; reasons.push('Age is an exact match'); }
+  else if (ageDelta !== null && ageDelta <= 2) { score += 12; reasons.push(`Age is within ${ageDelta} year${ageDelta === 1 ? '' : 's'}`); }
+  else if (ageDelta !== null && ageDelta <= 5) { score += 6; reasons.push(`Age is within ${ageDelta} years`); }
+  if (locationMatch) { score += 25; reasons.push('Location matches'); }
+  if (usernameMatch) { score += 30; reasons.push('Username appears'); }
+  if (faceScore !== null && faceScore >= 83) { score += 35; reasons.push(`Provider face score ${Math.round(faceScore)}/100`); }
+  else if (faceScore !== null && faceScore >= 70) { score += 18; reasons.push(`Provider face score ${Math.round(faceScore)}/100`); }
+
+  const hasSpecificSignal = locationMatch || usernameMatch || (faceScore !== null && faceScore >= 70);
+  if (!hasSpecificSignal) score = Math.min(score, 55);
+  if (!nameMatch && !usernameMatch && (faceScore === null || faceScore < 70)) score = Math.min(score, 30);
+  reasons.push('Post claims are unverified user content');
+
+  return {
+    confidence: Math.max(0, Math.min(100, Math.round(score))),
+    reasons,
+    subjectAge: itemAge === null ? undefined : Math.round(itemAge),
+    subjectLocation: itemLocation || undefined,
+    providerScore: numberOrNull(item.matchScore ?? item.confidence) ?? undefined,
+  };
+}
+
+function teaItems(payload: unknown) {
+  if (Array.isArray(payload)) return payload;
+  const root = asRecord(payload);
+  const candidates = [root.results, root.posts, root.boxxPosts, root.items, asRecord(root.data).items, asRecord(root.data).posts];
+  return candidates.flatMap((value) => Array.isArray(value) ? value : []);
+}
+
+function normalizeTeaResults(payload: unknown, profile: CreateScanRequest): ProviderEvidence[] {
+  const seen = new Set<string>();
+  const results: ProviderEvidence[] = [];
+  for (const entry of teaItems(payload)) {
+    const item = asRecord(entry);
+    const title = cleanText(item.subject || item.title, 160) || 'Tea post candidate';
+    const excerpt = cleanText(item.content || item.caption || item.excerpt || item.description, 1200);
+    if (!excerpt && title === 'Tea post candidate') continue;
+    const externalId = cleanText(item.postId || item.id || item.guid, 240);
+    const dedupeKey = externalId || `${normalized(title)}:${normalized(excerpt)}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    const comments = commentsFrom(item.comments);
+    const flags = asRecord(item.flags);
+    const redFlagIds = stringList(item.redFlagIds);
+    const greenFlagIds = stringList(item.greenFlagIds);
+    const signals = identitySignals(profile, item);
+    const imageBase64 = item.imageBase64 || asRecord(Array.isArray(item.photos) ? item.photos[0] : undefined).base64;
+    results.push({
+      source: 'Tea', kind: 'tea_post', provider: 'Authorized Tea connector', externalId: externalId || undefined,
+      title, excerpt, sourceUrl: safeUrl(item.url || item.sourceUrl),
+      confidence: signals.confidence, providerScore: signals.providerScore, reasons: signals.reasons,
+      capturedAt: cleanText(item.postedAt || item.createdAt || item.capturedAt, 50) || undefined,
+      subjectAge: signals.subjectAge, subjectLocation: signals.subjectLocation,
+      commentCount: integer(item.commentCount ?? item.numberOfComments, comments.length),
+      redFlags: integer(flags.red ?? item.redFlags, redFlagIds.length),
+      greenFlags: integer(flags.green ?? item.greenFlags, greenFlagIds.length),
+      comments, image: decodeImage(imageBase64),
+      metadata: { approvalStage: cleanText(item.approvalStage, 80) || undefined, categoryIds: stringList(item.categoryIds), isNationwide: Boolean(item.isNationwide) },
+    });
+    if (results.length >= 80) break;
+  }
+  return results;
+}
+
+async function teaProvider(_scanId: string, profile: CreateScanRequest): Promise<ProviderResult> {
   const endpoint = setting('TEA_AUTHORIZED_ENDPOINT');
   const token = setting('TEA_AUTHORIZED_TOKEN');
-  if (!endpoint || !token) {
-    return {
-      status: 'queued',
-      note: 'Awaiting a manual Tea review. An authorized analyst must complete this source check.',
-      evidence: [],
-    };
-  }
-
+  if (!endpoint || !token) return { status: 'queued', note: 'Awaiting an authorized Tea connector or manual analyst review.', evidence: [] };
   try {
     const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        firstName: profile.firstName,
-        age: profile.age,
-        city: profile.city,
-        usernames: profile.usernames,
-        purpose: 'self-search',
-      }),
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName: profile.firstName, name: profile.firstName, age: profile.age, city: profile.city, location: profile.city, usernames: profile.usernames, radius: 100, purpose: 'self-search' }),
     });
-    if (!response.ok) throw new Error(`Provider returned ${response.status}`);
-    const payload = await response.json() as { results?: unknown[] };
-    const evidence = (Array.isArray(payload.results) ? payload.results : []).slice(0, 25).map((item) => {
-      const result = item as Record<string, unknown>;
-      return {
-        source: 'Tea' as const,
-        title: cleanText(result.title, 160) || 'Tea mention',
-        excerpt: cleanText(result.excerpt),
-        sourceUrl: cleanText(result.url, 1000) || undefined,
-        confidence: Math.max(0, Math.min(100, Number(result.confidence) || 0)),
-        reasons: Array.isArray(result.reasons) ? result.reasons.filter((value): value is string => typeof value === 'string').slice(0, 6) : [],
-        capturedAt: cleanText(result.capturedAt, 40) || undefined,
-      };
-    });
-    return { status: 'complete', note: `Authorized Tea provider checked; ${evidence.length} candidate${evidence.length === 1 ? '' : 's'} returned.`, evidence };
+    if (!response.ok) throw new Error(`provider returned ${response.status}`);
+    const evidence = normalizeTeaResults(await response.json(), profile);
+    return { status: 'complete', note: `${evidence.length} Tea candidate${evidence.length === 1 ? '' : 's'} returned. Identity confidence was recalculated from visible signals.`, evidence };
   } catch (error) {
     return { status: 'failed', note: error instanceof Error ? `Tea provider failed: ${error.message}` : 'Tea provider failed.', evidence: [] };
   }
 }
 
-async function publicWebProvider(profile: CreateScanRequest): Promise<ProviderResult> {
-  const apiKey = setting('BRAVE_SEARCH_API_KEY');
-  if (!apiKey) {
-    return { status: 'unconfigured', note: 'Public web search is ready but needs BRAVE_SEARCH_API_KEY in .env.local.', evidence: [] };
-  }
+async function faceCheckProvider(scanId: string, profile: CreateScanRequest): Promise<ProviderResult> {
+  const photo = await database().prepare('SELECT object_key, mime_type FROM scan_photos WHERE scan_id = ?').bind(scanId).first<{ object_key: string; mime_type: string }>();
+  if (!photo) return { status: 'complete', note: 'Skipped because no reference photo was added.', evidence: [] };
+  if (profile.faceSearchConfirmed !== true) return { status: 'complete', note: 'Skipped because third-party face-search consent was not provided.', evidence: [] };
+  const token = setting('FACE_CHECK_API_TOKEN');
+  if (!token) return { status: 'unconfigured', note: 'Reference photo saved, but FaceCheck needs FACE_CHECK_API_TOKEN.', evidence: [] };
 
   try {
-    const terms = [`\"${profile.firstName}\"`, `\"${profile.city}\"`, ...profile.usernames.map((name) => `\"${name}\"`)].join(' ');
-    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(terms)}&count=10&safesearch=strict`, {
-      headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey },
-    });
-    if (!response.ok) throw new Error(`Search provider returned ${response.status}`);
-    const payload = await response.json() as { web?: { results?: Array<{ title?: string; description?: string; url?: string; age?: string }> } };
-    const evidence = (payload.web?.results || []).map((result) => {
-      const haystack = `${result.title || ''} ${result.description || ''}`.toLowerCase();
-      const reasons = [
-        haystack.includes(profile.firstName.toLowerCase()) ? 'First name appears' : '',
-        haystack.includes(profile.city.toLowerCase()) ? 'Location appears' : '',
-        profile.usernames.some((username) => haystack.includes(username.replace(/^[@/u]+/, '').toLowerCase())) ? 'Username appears' : '',
-      ].filter(Boolean);
+    const object = await evidenceBucket().get(photo.object_key);
+    if (!object) throw new Error('reference photo was not found');
+    const upload = new FormData();
+    upload.append('images', new Blob([await object.arrayBuffer()], { type: photo.mime_type }), 'reference-photo');
+    upload.append('id_search', '');
+    const uploadResponse = await fetch('https://facecheck.id/api/upload_pic', { method: 'POST', headers: { Accept: 'application/json', Authorization: token }, body: upload });
+    if (!uploadResponse.ok) throw new Error(`upload returned ${uploadResponse.status}`);
+    const uploadPayload = asRecord(await uploadResponse.json());
+    if (uploadPayload.error) throw new Error(`${cleanText(uploadPayload.error, 160)} (${cleanText(uploadPayload.code, 40)})`);
+    const searchId = cleanText(uploadPayload.id_search, 240);
+    if (!searchId) throw new Error('upload did not return a search ID');
+
+    const testingMode = (setting('FACE_CHECK_TESTING_MODE') || '').toLowerCase() === 'true';
+    const deadline = Date.now() + 55_000;
+    let items: unknown[] = [];
+    while (Date.now() < deadline) {
+      const searchResponse = await fetch('https://facecheck.id/api/search', {
+        method: 'POST', headers: { Accept: 'application/json', Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_search: searchId, with_progress: true, status_only: false, demo: testingMode }),
+      });
+      if (!searchResponse.ok) throw new Error(`search returned ${searchResponse.status}`);
+      const searchPayload = asRecord(await searchResponse.json());
+      if (searchPayload.error) throw new Error(`${cleanText(searchPayload.error, 160)} (${cleanText(searchPayload.code, 40)})`);
+      const output = asRecord(searchPayload.output);
+      if (Array.isArray(output.items)) { items = output.items; break; }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    if (!items.length) throw new Error('search did not complete within 55 seconds');
+
+    const evidence = items.map((entry) => {
+      const item = asRecord(entry);
+      const url = safeUrl(item.url) || '';
+      const score = Math.max(0, Math.min(100, integer(item.score)));
+      if (!url || score < 50) return null;
+      let hostname = 'the public web';
+      try { hostname = new URL(url).hostname.replace(/^www\./, ''); } catch { /* retain fallback */ }
       return {
-        source: 'Public web' as const,
-        title: cleanText(result.title, 160) || 'Public web mention',
-        excerpt: cleanText(result.description),
-        sourceUrl: cleanText(result.url, 1000) || undefined,
-        confidence: Math.min(92, 35 + reasons.length * 18),
-        reasons,
-        capturedAt: result.age || undefined,
-      };
+        source: 'Face search' as const, kind: 'face_match' as const, provider: 'FaceCheck',
+        externalId: cleanText(item.guid || item.index, 240) || undefined,
+        title: `Possible face match on ${hostname}`,
+        excerpt: 'A visually similar face was indexed on this public page. Confirm the person and page context yourself.',
+        sourceUrl: url, confidence: score, providerScore: score,
+        reasons: [`FaceCheck similarity score ${score}/100`, `Indexed on ${hostname}`, score < 83 ? 'Below FaceCheck high-confidence range' : 'High provider similarity score'],
+        capturedAt: cleanText(item.seen, 50) || new Date().toISOString(), image: decodeImage(item.base64),
+        metadata: { searchId, group: item.group, indexDB: item.indexDB },
+      } satisfies ProviderEvidence;
+    }).filter((item): item is ProviderEvidence => Boolean(item)).sort((a, b) => b.confidence - a.confidence).slice(0, 40);
+    return { status: 'complete', note: `${evidence.length} FaceCheck web candidate${evidence.length === 1 ? '' : 's'} stored${testingMode ? ' in testing mode' : ''}. These results are separate from Tea posts.`, evidence };
+  } catch (error) {
+    return { status: 'failed', note: error instanceof Error ? `FaceCheck failed: ${error.message}` : 'FaceCheck failed.', evidence: [] };
+  }
+}
+
+async function publicWebProvider(_scanId: string, profile: CreateScanRequest): Promise<ProviderResult> {
+  const apiKey = setting('BRAVE_SEARCH_API_KEY');
+  if (!apiKey) return { status: 'unconfigured', note: 'Public web search needs BRAVE_SEARCH_API_KEY.', evidence: [] };
+  try {
+    const terms = [`\"${profile.firstName}\"`, `\"${profile.city}\"`, ...profile.usernames.map((name) => `\"${name}\"`)].join(' ');
+    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(terms)}&count=20&safesearch=strict`, { headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey } });
+    if (!response.ok) throw new Error(`provider returned ${response.status}`);
+    const payload = await response.json() as { web?: { results?: Array<{ title?: string; description?: string; url?: string; age?: string }> } };
+    const evidence = (payload.web?.results || []).map((result): ProviderEvidence => {
+      const haystack = `${result.title || ''} ${result.description || ''}`;
+      const nameMatch = containsTerm(haystack, profile.firstName);
+      const locationMatch = containsTerm(haystack, profile.city);
+      const usernameMatch = profile.usernames.some((username) => containsTerm(haystack, username.replace(/^@/, '')));
+      const reasons = [nameMatch ? 'First name appears' : '', locationMatch ? 'Location appears' : '', usernameMatch ? 'Username appears' : ''].filter(Boolean);
+      const confidence = Math.min(90, 15 + (nameMatch ? 20 : 0) + (locationMatch ? 25 : 0) + (usernameMatch ? 30 : 0));
+      return { source: 'Public web', kind: 'web_page', provider: 'Brave Search', title: cleanText(result.title, 160) || 'Public web candidate', excerpt: cleanText(result.description, 1200), sourceUrl: safeUrl(result.url), confidence, reasons, capturedAt: cleanText(result.age, 50) || new Date().toISOString() };
     });
-    return { status: 'complete', note: `Public web checked; ${evidence.length} candidate${evidence.length === 1 ? '' : 's'} returned.`, evidence };
+    return { status: 'complete', note: `${evidence.length} public-web candidate${evidence.length === 1 ? '' : 's'} returned.`, evidence };
   } catch (error) {
     return { status: 'failed', note: error instanceof Error ? `Public web search failed: ${error.message}` : 'Public web search failed.', evidence: [] };
   }
 }
 
-export async function runProviders(scanId: string, sessionId: string, profile: CreateScanRequest) {
-  const providers = [
-    { name: 'Tea' as const, run: teaProvider },
-    { name: 'Public web' as const, run: publicWebProvider },
-  ];
-
-  for (const provider of providers) {
-    const now = new Date().toISOString();
-    await database().prepare('UPDATE source_runs SET status = ?, started_at = ? WHERE scan_id = ? AND source = ?')
-      .bind('running', now, scanId, provider.name).run();
-    const result = await provider.run(profile);
-    const finished = new Date().toISOString();
-    const writes: D1PreparedStatement[] = [
-      database().prepare('UPDATE source_runs SET status = ?, note = ?, completed_at = ? WHERE scan_id = ? AND source = ?')
-        .bind(result.status, result.note, result.status === 'queued' ? null : finished, scanId, provider.name),
-    ];
+async function persistResult(scanId: string, sessionId: string, source: SourceName, result: ProviderResult) {
+  const finished = new Date().toISOString();
+  const statements: D1PreparedStatement[] = [];
+  const objectKeys: string[] = [];
+  try {
     for (const item of result.evidence) {
-      writes.push(database().prepare(`
-        INSERT INTO evidence (id, scan_id, session_id, source, title, excerpt, source_url, confidence, reasons_json, captured_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(crypto.randomUUID(), scanId, sessionId, item.source, item.title, item.excerpt, item.sourceUrl || null, item.confidence, JSON.stringify(item.reasons), item.capturedAt || finished, finished));
+      const evidenceId = crypto.randomUUID();
+      let objectKey: string | null = null;
+      if (item.image) {
+        objectKey = `${sessionId}/${scanId}/provider-${evidenceId}`;
+        await evidenceBucket().put(objectKey, item.image.bytes, { httpMetadata: { contentType: item.image.mimeType }, customMetadata: { provider: item.provider } });
+        objectKeys.push(objectKey);
+      }
+      statements.push(database().prepare(`
+        INSERT INTO evidence (id, scan_id, session_id, source, kind, provider, external_id, title, excerpt, source_url, confidence, provider_score, reasons_json, subject_age, subject_location, comment_count, red_flags, green_flags, metadata_json, captured_at, object_key, mime_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(evidenceId, scanId, sessionId, item.source, item.kind, item.provider, item.externalId || null, item.title, item.excerpt, item.sourceUrl || null, item.confidence, item.providerScore ?? null, JSON.stringify(item.reasons), item.subjectAge ?? null, item.subjectLocation || null, item.commentCount || 0, item.redFlags || 0, item.greenFlags || 0, JSON.stringify(item.metadata || {}), item.capturedAt || finished, objectKey, item.image?.mimeType || null, finished));
+      for (const comment of item.comments || []) statements.push(database().prepare('INSERT INTO evidence_comments (id, evidence_id, external_id, author, text, posted_at, reactions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(crypto.randomUUID(), evidenceId, comment.externalId || null, comment.author, comment.text, comment.postedAt || null, comment.reactions, finished));
     }
-    await database().batch(writes);
+    statements.push(database().prepare('UPDATE source_runs SET status = ?, note = ?, completed_at = ? WHERE scan_id = ? AND source = ?').bind(result.status, result.note, result.status === 'queued' ? null : finished, scanId, source));
+    for (let index = 0; index < statements.length; index += 75) await database().batch(statements.slice(index, index + 75));
+  } catch (error) {
+    await database().prepare("DELETE FROM evidence WHERE scan_id = ? AND source = ? AND kind != 'manual_import'").bind(scanId, source).run().catch(() => undefined);
+    await Promise.all(objectKeys.map((key) => evidenceBucket().delete(key).catch(() => undefined)));
+    throw error;
   }
+}
+
+export async function runProviders(scanId: string, sessionId: string, profile: CreateScanRequest) {
+  const providers: ProviderDefinition[] = [
+    { name: 'Tea', run: teaProvider },
+    { name: 'Face search', run: faceCheckProvider },
+    { name: 'Public web', run: publicWebProvider },
+  ];
+  const started = new Date().toISOString();
+  await database().batch(providers.map((provider) => database().prepare('UPDATE source_runs SET status = ?, note = ?, started_at = ? WHERE scan_id = ? AND source = ?').bind('running', `Checking ${provider.name}…`, started, scanId, provider.name)));
+  const results = await Promise.all(providers.map(async (provider) => ({ provider, result: await provider.run(scanId, profile) })));
+  for (const { provider, result } of results) await persistResult(scanId, sessionId, provider.name, result);
 }

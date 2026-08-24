@@ -7,6 +7,8 @@ type GossipEnv = {
   BRAVE_SEARCH_API_KEY?: string;
   TEA_AUTHORIZED_ENDPOINT?: string;
   TEA_AUTHORIZED_TOKEN?: string;
+  FACE_CHECK_API_TOKEN?: string;
+  FACE_CHECK_TESTING_MODE?: string;
 };
 
 export const runtimeEnv = env as unknown as GossipEnv;
@@ -15,9 +17,10 @@ const schema = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, first_name TEXT NOT NULL, age INTEGER NOT NULL, city TEXT NOT NULL, usernames_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
+CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, face_search_consent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS source_runs (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, source TEXT NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, started_at TEXT, completed_at TEXT);
-CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, source TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL, source_url TEXT, confidence INTEGER NOT NULL DEFAULT 0, reasons_json TEXT NOT NULL DEFAULT '[]', captured_at TEXT NOT NULL, object_key TEXT, mime_type TEXT, dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'manual_import', provider TEXT NOT NULL DEFAULT 'GossipCheck', external_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, source_url TEXT, confidence INTEGER NOT NULL DEFAULT 0, provider_score INTEGER, reasons_json TEXT NOT NULL DEFAULT '[]', subject_age INTEGER, subject_location TEXT, comment_count INTEGER NOT NULL DEFAULT 0, red_flags INTEGER NOT NULL DEFAULT 0, green_flags INTEGER NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL DEFAULT '{}', captured_at TEXT NOT NULL, object_key TEXT, mime_type TEXT, dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evidence_comments (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE, external_id TEXT, author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, posted_at TEXT, reactions INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scan_photos (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL UNIQUE REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, object_key TEXT NOT NULL, mime_type TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS profiles_session_idx ON profiles(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS scans_session_idx ON scans(session_id, created_at DESC);
@@ -48,7 +51,39 @@ export async function ensureSchema() {
     if (!scanColumns.some((column) => column.name === 'access_token_hash')) {
       await db.prepare('ALTER TABLE scans ADD COLUMN access_token_hash TEXT').run();
     }
+    if (!scanColumns.some((column) => column.name === 'face_search_consent')) {
+      await db.prepare('ALTER TABLE scans ADD COLUMN face_search_consent INTEGER NOT NULL DEFAULT 0').run();
+    }
+    const evidenceColumns = (await db.prepare('PRAGMA table_info(evidence)').all<{ name: string }>()).results;
+    const additions = [
+      ['kind', "TEXT NOT NULL DEFAULT 'manual_import'"],
+      ['provider', "TEXT NOT NULL DEFAULT 'GossipCheck'"],
+      ['external_id', 'TEXT'],
+      ['provider_score', 'INTEGER'],
+      ['subject_age', 'INTEGER'],
+      ['subject_location', 'TEXT'],
+      ['comment_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ['red_flags', 'INTEGER NOT NULL DEFAULT 0'],
+      ['green_flags', 'INTEGER NOT NULL DEFAULT 0'],
+      ['metadata_json', "TEXT NOT NULL DEFAULT '{}'"],
+    ] as const;
+    for (const [name, definition] of additions) {
+      if (!evidenceColumns.some((column) => column.name === name)) {
+        await db.prepare(`ALTER TABLE evidence ADD COLUMN ${name} ${definition}`).run();
+      }
+    }
+    await db.prepare("CREATE TABLE IF NOT EXISTS evidence_comments (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE, external_id TEXT, author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, posted_at TEXT, reactions INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)").run();
     await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS scans_access_token_hash_idx ON scans(access_token_hash) WHERE access_token_hash IS NOT NULL').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS evidence_external_idx ON evidence(provider, external_id) WHERE external_id IS NOT NULL').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS evidence_comments_evidence_idx ON evidence_comments(evidence_id, posted_at)').run();
+    await db.prepare("UPDATE evidence SET kind = 'web_page', provider = 'Brave Search' WHERE source = 'Public web' AND kind = 'manual_import' AND reasons_json NOT LIKE '%Imported by you%'").run();
+    await db.prepare("UPDATE evidence SET kind = 'tea_post', provider = 'Legacy Tea connector' WHERE source = 'Tea' AND kind = 'manual_import' AND reasons_json NOT LIKE '%Imported by you%' AND reasons_json NOT LIKE '%Analyst reviewed%'").run();
+    await db.prepare(`
+      INSERT INTO source_runs (id, scan_id, source, status, note, completed_at)
+      SELECT lower(hex(randomblob(16))), s.id, 'Face search', 'complete', 'Not run for this legacy scan.', s.completed_at
+      FROM scans s
+      WHERE NOT EXISTS (SELECT 1 FROM source_runs sr WHERE sr.scan_id = s.id AND sr.source = 'Face search')
+    `).run();
     await db.prepare(`
       UPDATE source_runs
       SET status = 'queued', note = 'Awaiting a manual Tea review. An authorized analyst must complete this source check.'
@@ -106,6 +141,9 @@ type EvidenceRow = {
   id: string;
   scan_id: string;
   source: SourceName;
+  kind: EvidenceRecord['kind'];
+  provider: string;
+  external_id: string | null;
   title: string;
   excerpt: string;
   source_url: string | null;
@@ -114,6 +152,21 @@ type EvidenceRow = {
   captured_at: string;
   object_key: string | null;
   dismissed: number;
+  provider_score: number | null;
+  subject_age: number | null;
+  subject_location: string | null;
+  comment_count: number;
+  red_flags: number;
+  green_flags: number;
+};
+
+type CommentRow = {
+  id: string;
+  evidence_id: string;
+  author: string;
+  text: string;
+  posted_at: string | null;
+  reactions: number;
 };
 
 function parseJsonArray(value: string): string[] {
@@ -142,15 +195,26 @@ async function evidenceRows(scanIds: string[], sessionId: string) {
   if (!scanIds.length) return [];
   const placeholders = scanIds.map(() => '?').join(',');
   const statement = database().prepare(`
-    SELECT id, scan_id, source, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, dismissed
+    SELECT id, scan_id, source, kind, provider, external_id, title, excerpt, source_url, confidence, provider_score,
+      reasons_json, subject_age, subject_location, comment_count, red_flags, green_flags, captured_at, object_key, dismissed
     FROM evidence WHERE session_id = ? AND scan_id IN (${placeholders}) ORDER BY created_at DESC
   `).bind(sessionId, ...scanIds);
   return (await statement.all<EvidenceRow>()).results;
 }
 
+async function commentRows(evidenceIds: string[]) {
+  if (!evidenceIds.length) return [];
+  const placeholders = evidenceIds.map(() => '?').join(',');
+  return (await database().prepare(`
+    SELECT id, evidence_id, author, text, posted_at, reactions
+    FROM evidence_comments WHERE evidence_id IN (${placeholders}) ORDER BY posted_at ASC, rowid ASC
+  `).bind(...evidenceIds).all<CommentRow>()).results;
+}
+
 export async function hydrateScans(rows: ScanRow[], sessionId: string): Promise<ScanRecord[]> {
   const ids = rows.map((row) => row.id);
   const [sources, evidence] = await Promise.all([sourceRows(ids, sessionId), evidenceRows(ids, sessionId)]);
+  const comments = await commentRows(evidence.map((item) => item.id));
 
   return rows.map((row) => ({
     id: row.id,
@@ -175,6 +239,9 @@ export async function hydrateScans(rows: ScanRow[], sessionId: string): Promise<
     evidence: evidence.filter((item) => item.scan_id === row.id).map((item): EvidenceRecord => ({
       id: item.id,
       source: item.source,
+      kind: item.kind,
+      provider: item.provider,
+      externalId: item.external_id,
       title: item.title,
       excerpt: item.excerpt,
       sourceUrl: item.source_url,
@@ -184,6 +251,19 @@ export async function hydrateScans(rows: ScanRow[], sessionId: string): Promise<
       hasImage: Boolean(item.object_key),
       imageUrl: item.object_key ? `/api/evidence/${item.id}/asset` : null,
       dismissed: Boolean(item.dismissed),
+      subjectAge: item.subject_age,
+      subjectLocation: item.subject_location,
+      commentCount: item.comment_count,
+      redFlags: item.red_flags,
+      greenFlags: item.green_flags,
+      providerScore: item.provider_score,
+      comments: comments.filter((comment) => comment.evidence_id === item.id).map((comment) => ({
+        id: comment.id,
+        author: comment.author,
+        text: comment.text,
+        postedAt: comment.posted_at,
+        reactions: comment.reactions,
+      })),
     })),
   }));
 }

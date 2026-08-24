@@ -683,6 +683,11 @@ footer div { display: flex; gap: 20px; }
 .report-preview-list span { border: 1px solid var(--ink); background: var(--lime); }
 .photo-drop { width: min(650px, 100%); min-height: 235px; border: 2px dashed var(--ink); border-radius: 15px; background: var(--light); box-shadow: 6px 6px 0 var(--ink); }
 .photo-drop > span { border: 1.5px solid var(--ink); background: var(--lime); color: var(--ink); }
+.face-consent { width: min(650px, 100%); margin: 18px auto 0; display: grid; grid-template-columns: 24px 1fr; gap: 12px; align-items: start; padding: 15px 17px; border: 1.5px solid var(--ink); border-radius: 11px; background: #e7ecff; color: var(--ink); text-align: left; box-shadow: 3px 3px 0 var(--ink); cursor: pointer; }
+.face-consent input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--blue); }
+.face-consent span { display: grid; gap: 3px; }
+.face-consent b { font-size: 12px; }
+.face-consent small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 
 .searching-page { background: var(--paper); }
 .searching-page > section { margin-top: 8vh; }

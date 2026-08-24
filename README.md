@@ -19,9 +19,12 @@ Open [http://localhost:3000/check](http://localhost:3000/check) for onboarding. 
 - R2 stores evidence screenshots. Images are only returned when the request owns the matching session cookie.
 - Optional onboarding reference photos are also stored in R2 and protected by the same session ownership check.
 - The Tea adapter is deliberately credential-gated. Set `TEA_AUTHORIZED_ENDPOINT` and `TEA_AUTHORIZED_TOKEN` only for a source you are contractually and technically allowed to query.
+- The Tea adapter accepts both a generic `{ results: [...] }` response and native Tea-shaped `posts`/`items` records. GossipCheck recalculates identity confidence from visible name, age, location, username, and explicit face-match signals instead of trusting a provider's opaque score. Embedded comments, flags, counts, provider IDs, and post metadata are retained.
+- Set `FACE_CHECK_API_TOKEN` to enable FaceCheck's official upload-and-poll API. A scan is created first, its optional photo is saved, and providers run only afterward. The photo is sent only after explicit consent. FaceCheck results stay in a separate source from Tea results and retain the provider similarity score.
 - Set `BRAVE_SEARCH_API_KEY` to enable the public-web provider.
 - When no authorized Tea connector is configured, scans enter the private analyst queue at [http://localhost:3000/review](http://localhost:3000/review). Set `ANALYST_REVIEW_TOKEN`, open the queue with that token, review the supplied identifiers/photo using an account and process you are authorized to use, then submit found, uncertain, or not-found. The customer report polls and updates automatically.
-- Without provider credentials, public-web scans clearly report that source as unconfigured. Users can import Tea evidence they lawfully possess. Real searches never generate fake matches.
+- Without provider credentials, sources clearly report that they are unconfigured or queued. Users can import Tea evidence they lawfully possess. Real searches never generate fake matches.
+- D1 caches each completed report, provider run state, normalized provider records, and supplied comments. Reopening a completed report does not rerun paid searches.
 
 Copy `.env.example` to `.env.local` to configure optional providers and the analyst token. The provider adapter contract is implemented in `lib/providers.ts`.
 
