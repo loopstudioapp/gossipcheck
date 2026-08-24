@@ -4,6 +4,7 @@ import CheckFlow from '../check/check-flow';
 export const metadata: Metadata = {
   title: 'Private report — GossipCheck',
   description: 'Review your saved GossipCheck evidence, source status, and private scan history.',
+  referrer: 'no-referrer',
   robots: { index: false, follow: false },
   openGraph: {
     title: 'Private report — GossipCheck',

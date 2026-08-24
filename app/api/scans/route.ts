@@ -46,13 +46,16 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const profileId = crypto.randomUUID();
     const scanId = crypto.randomUUID();
+    const accessToken = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+    const tokenDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(accessToken));
+    const accessTokenHash = [...new Uint8Array(tokenDigest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
     const profile: CreateScanRequest = { firstName, city, age, usernames, selfSearchConfirmed: true };
 
     await database().batch([
       database().prepare(`INSERT INTO profiles (id, session_id, first_name, age, city, usernames_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(profileId, session.id, firstName, age, city, JSON.stringify(usernames), now, now),
-      database().prepare(`INSERT INTO scans (id, session_id, profile_id, status, created_at, started_at) VALUES (?, ?, ?, 'running', ?, ?)`)
-        .bind(scanId, session.id, profileId, now, now),
+      database().prepare(`INSERT INTO scans (id, session_id, profile_id, access_token_hash, status, created_at, started_at) VALUES (?, ?, ?, ?, 'running', ?, ?)`)
+        .bind(scanId, session.id, profileId, accessTokenHash, now, now),
       database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Tea', 'queued', 'Waiting for Tea provider.')`)
         .bind(crypto.randomUUID(), scanId),
       database().prepare(`INSERT INTO source_runs (id, scan_id, source, status, note) VALUES (?, ?, 'Public web', 'queued', 'Waiting for public web provider.')`)
@@ -71,7 +74,7 @@ export async function POST(request: Request) {
     }
 
     const [scan] = await getScans(session.id, scanId);
-    return session.attach(NextResponse.json({ scan }, { status: 201 }));
+    return session.attach(NextResponse.json({ scan, accessToken }, { status: 201 }));
   } catch (error) {
     console.error('Could not create scan', error);
     return NextResponse.json({ error: 'The scan could not be created.' }, { status: 500 });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { database, evidenceBucket, getScans } from '../../../../../lib/database';
+import { database, evidenceBucket, getScans, sessionIdForReportAccess } from '../../../../../lib/database';
 import { sessionFor } from '../../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const session = await sessionFor(request);
     const { id: scanId } = await context.params;
-    const [ownedScan] = await getScans(session.id, scanId);
+    let effectiveSessionId = session.id;
+    let [ownedScan] = await getScans(effectiveSessionId, scanId);
+    if (!ownedScan) {
+      const accessToken = new URL(request.url).searchParams.get('access_token') || '';
+      const accessSessionId = await sessionIdForReportAccess(scanId, accessToken);
+      if (accessSessionId) {
+        effectiveSessionId = accessSessionId;
+        [ownedScan] = await getScans(effectiveSessionId, scanId);
+      }
+    }
     if (!ownedScan) return session.attach(NextResponse.json({ error: 'Scan not found.' }, { status: 404 }));
 
     const data = await request.formData();
@@ -37,7 +46,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const evidenceId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const objectKey = file ? `${session.id}/${scanId}/${evidenceId}` : null;
+    const objectKey = file ? `${effectiveSessionId}/${scanId}/${evidenceId}` : null;
     if (file && objectKey) {
       await evidenceBucket().put(objectKey, await file.arrayBuffer(), {
         httpMetadata: { contentType: file.type },
@@ -49,13 +58,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await database().prepare(`
         INSERT INTO evidence (id, scan_id, session_id, source, title, excerpt, source_url, confidence, reasons_json, captured_at, object_key, mime_type, created_at)
         VALUES (?, ?, ?, 'Tea', ?, ?, ?, 100, ?, ?, ?, ?, ?)
-      `).bind(evidenceId, scanId, session.id, title, excerpt, sourceUrl || null, JSON.stringify(['Imported by you', file ? 'Screenshot attached' : 'Source details supplied']), capturedAtInput || now, objectKey, file?.type || null, now).run();
+      `).bind(evidenceId, scanId, effectiveSessionId, title, excerpt, sourceUrl || null, JSON.stringify(['Imported by you', file ? 'Screenshot attached' : 'Source details supplied']), capturedAtInput || now, objectKey, file?.type || null, now).run();
     } catch (error) {
       if (objectKey) await evidenceBucket().delete(objectKey);
       throw error;
     }
 
-    const [scan] = await getScans(session.id, scanId);
+    const [scan] = await getScans(effectiveSessionId, scanId);
     return session.attach(NextResponse.json({ scan }, { status: 201 }));
   } catch (error) {
     console.error('Could not save evidence', error);

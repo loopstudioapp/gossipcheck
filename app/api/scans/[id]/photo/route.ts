@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { database, evidenceBucket, getScans } from '../../../../../lib/database';
+import { database, evidenceBucket, getScans, sessionIdForReportAccess } from '../../../../../lib/database';
 import { sessionFor } from '../../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
 
 const allowedImages = new Set(['image/jpeg', 'image/png', 'image/webp']);
-type PhotoRow = { object_key: string; mime_type: string };
+type PhotoRow = { session_id: string; object_key: string; mime_type: string };
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -51,9 +51,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const session = await sessionFor(request);
     const { id: scanId } = await context.params;
-    const row = await database().prepare('SELECT object_key, mime_type FROM scan_photos WHERE scan_id = ? AND session_id = ?')
-      .bind(scanId, session.id).first<PhotoRow>();
+    const row = await database().prepare('SELECT session_id, object_key, mime_type FROM scan_photos WHERE scan_id = ?')
+      .bind(scanId).first<PhotoRow>();
     if (!row) return session.attach(NextResponse.json({ error: 'Photo not found.' }, { status: 404 }));
+    if (row.session_id !== session.id) {
+      const accessToken = new URL(request.url).searchParams.get('access_token') || '';
+      const accessSessionId = await sessionIdForReportAccess(scanId, accessToken);
+      if (accessSessionId !== row.session_id) return session.attach(NextResponse.json({ error: 'Photo not found.' }, { status: 404 }));
+    }
     const object = await evidenceBucket().get(row.object_key);
     if (!object) return session.attach(NextResponse.json({ error: 'Photo not found.' }, { status: 404 }));
     return session.attach(new Response(object.body, { headers: {

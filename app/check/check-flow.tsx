@@ -17,8 +17,13 @@ const experiences = [
   ['🤷', 'Interested matches never responded'],
 ];
 
-const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'unconfigured' ? 'Needs setup' : status;
-const evidenceLabel = (item: EvidenceRecord) => item.reasons.includes('Example report') ? 'Example result' : item.reasons.includes('Imported by you') ? 'Imported' : item.confidence >= 85 ? 'Strong match' : 'Potential match';
+const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'queued' || status === 'running' ? 'In review' : status === 'unconfigured' ? 'Needs setup' : status;
+const evidenceLabel = (item: EvidenceRecord) => item.reasons.includes('Imported by you') ? 'Imported' : item.confidence >= 85 ? 'Strong match' : 'Potential match';
+const withAccessToken = (scan: ScanRecord, accessToken: string) => !accessToken ? scan : ({
+  ...scan,
+  profile: { ...scan.profile, photoUrl: scan.profile.photoUrl ? `${scan.profile.photoUrl}?access_token=${encodeURIComponent(accessToken)}` : null },
+  evidence: scan.evidence.map((item) => ({ ...item, imageUrl: item.imageUrl ? `${item.imageUrl}?access_token=${encodeURIComponent(accessToken)}` : null })),
+});
 
 export default function CheckFlow({ initialView = 'onboarding' }: { initialView?: AppView }) {
   const [view, setView] = useState<AppView>(initialView);
@@ -40,13 +45,19 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       if (response.ok && data.scans) {
         let scans = data.scans;
         if (initialView === 'report') {
-          const requestedId = new URL(window.location.href).searchParams.get('scan_id');
-          if (!requestedId && scans.length === 0) {
-            const demoResponse = await fetch('/api/scans/demo', { method: 'POST' });
-            const demoData = await demoResponse.json() as { scan?: ScanRecord };
-            if (demoResponse.ok && demoData.scan) scans = [demoData.scan];
+          const url = new URL(window.location.href);
+          const requestedId = url.searchParams.get('scan_id');
+          const accessToken = url.searchParams.get('access_token') || '';
+          let selected = requestedId ? scans.find((item) => item.id === requestedId) || null : scans[0] || null;
+          if (!selected && requestedId && accessToken) {
+            const reportResponse = await fetch(`/api/scans/${encodeURIComponent(requestedId)}?access_token=${encodeURIComponent(accessToken)}`);
+            const reportData = await reportResponse.json() as { scan?: ScanRecord };
+            if (reportResponse.ok && reportData.scan) {
+              selected = withAccessToken(reportData.scan, accessToken);
+              scans = [selected];
+            }
           }
-          setScan(requestedId ? scans.find((item) => item.id === requestedId) || null : scans[0] || null);
+          setScan(selected);
         }
         setHistory(scans);
       }
@@ -85,7 +96,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           selfSearchConfirmed: true,
         }),
       });
-      const data = await response.json() as { scan?: ScanRecord; error?: string };
+      const data = await response.json() as { scan?: ScanRecord; accessToken?: string; error?: string };
       if (!response.ok || !data.scan) throw new Error(data.error || 'The check could not be completed.');
       let completedScan = data.scan;
 
@@ -100,7 +111,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
       const remaining = Math.max(0, 2400 - (Date.now() - started));
       await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      window.location.assign(`/report?scan_id=${encodeURIComponent(completedScan.id)}`);
+      const reportUrl = new URL('/report', window.location.origin);
+      reportUrl.searchParams.set('scan_id', completedScan.id);
+      if (data.accessToken) reportUrl.searchParams.set('access_token', data.accessToken);
+      window.location.assign(`${reportUrl.pathname}${reportUrl.search}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The check could not be completed.');
       setView('onboarding');
@@ -117,11 +131,14 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     setError('');
     const form = event.currentTarget;
     try {
-      const response = await fetch(`/api/scans/${scan.id}/evidence`, { method: 'POST', body: new FormData(form) });
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      const response = await fetch(`/api/scans/${scan.id}/evidence${query}`, { method: 'POST', body: new FormData(form) });
       const data = await response.json() as { scan?: ScanRecord; error?: string };
       if (!response.ok || !data.scan) throw new Error(data.error || 'The evidence could not be saved.');
-      setScan(data.scan);
-      setHistory((current) => current.map((item) => item.id === data.scan!.id ? data.scan! : item));
+      const updatedScan = withAccessToken(data.scan, accessToken);
+      setScan(updatedScan);
+      setHistory((current) => current.map((item) => item.id === updatedScan.id ? updatedScan : item));
       setImportOpen(false);
       form.reset();
     } catch (caught) {
@@ -139,7 +156,9 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     setScan(updated);
     setSelectedEvidence((current) => current?.id === item.id ? { ...current, dismissed } : current);
     try {
-      const response = await fetch(`/api/evidence/${item.id}`, {
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      const response = await fetch(`/api/evidence/${item.id}${query}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dismissed }),
       });
       if (!response.ok) throw new Error();
@@ -157,7 +176,26 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const visibleEvidence = useMemo(() => scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || [], [scan, filter]);
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
   const publicEvidence = scan?.evidence.filter((item) => item.source === 'Public web') || [];
-  const isExampleReport = scan?.evidence.some((item) => item.reasons.includes('Example report')) || false;
+  const teaSource = scan?.sources.find((source) => source.name === 'Tea');
+  const teaReviewPending = teaSource?.status === 'queued' || teaSource?.status === 'running';
+  const teaSourceIssue = teaSource?.status === 'failed' || teaSource?.status === 'unconfigured';
+  const pendingScanId = teaReviewPending ? scan?.id : null;
+
+  useEffect(() => {
+    if (!pendingScanId) return;
+    const timer = window.setInterval(() => {
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      fetch(`/api/scans/${pendingScanId}${query}`).then(async (response) => {
+        const data = await response.json() as { scan?: ScanRecord };
+        if (!response.ok || !data.scan) return;
+        const refreshed = withAccessToken(data.scan, accessToken);
+        setScan(refreshed);
+        setHistory((current) => current.map((item) => item.id === refreshed.id ? refreshed : item));
+      }).catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [pendingScanId]);
 
   if (view === 'onboarding') return (
     <main className="funnel-page">
@@ -229,15 +267,14 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       </aside>
 
       <section className="report-main">
-        <header className="report-topbar"><BrandLink /><span>{isExampleReport ? 'EXAMPLE REPUTATION REPORT' : 'PRIVATE REPUTATION REPORT'}</span><button type="button" onClick={isExampleReport ? startOver : () => setImportOpen(true)}>{isExampleReport ? 'Start your check →' : '＋ Add Tea evidence'}</button></header>
-        {isExampleReport && <div className="report-example-note"><div><b>Example report</b><span>This fictional data shows how a completed GossipCheck report is organized. It is not a real search result.</span></div><button type="button" onClick={startOver}>Run your own check →</button></div>}
-        <div className={`report-alert ${teaEvidence.length ? 'found' : ''}`}><span>{teaEvidence.length ? '!' : 'i'}</span><div><h3>{isExampleReport ? 'Example Tea evidence collected' : teaEvidence.length ? 'Potential Tea evidence collected' : 'Tea provider needs authorized access'}</h3><p>{isExampleReport ? 'These sample items demonstrate the review experience. A real report only shows evidence returned by configured providers or imported by you.' : teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : 'No live Tea results were fabricated. Connect a provider you are allowed to use or import evidence you already possess.'}</p></div></div>
+        <header className="report-topbar"><BrandLink /><span>PRIVATE REPUTATION REPORT</span><button type="button" onClick={() => setImportOpen(true)}>＋ Add Tea evidence</button></header>
+        <div className={`report-alert ${teaEvidence.length ? 'found' : ''} ${teaReviewPending ? 'pending' : ''}`}><span>{teaEvidence.length ? '!' : teaReviewPending ? '…' : 'i'}</span><div><h3>{teaEvidence.length ? 'Potential Tea evidence collected' : teaReviewPending ? 'Tea review is queued' : teaSourceIssue ? 'Tea check needs attention' : 'No Tea evidence found'}</h3><p>{teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : teaReviewPending ? 'Your identifiers are saved and waiting for an authorized analyst or configured Tea connector. This report refreshes automatically when the review is completed.' : teaSourceIssue ? teaSource?.note : 'The Tea source check completed without evidence. You can still import material you lawfully possess.'}</p></div></div>
 
-        <div className="report-heading-row"><div><span>{scan.evidence.length} results found</span><h1>{filter === 'All' ? 'Potential matches' : `${filter} results`}</h1></div><small>Scan {scan.id.slice(0, 8)} · {sourceStatusLabel(scan.status)}</small></div>
+        <div className="report-heading-row"><div><span>{scan.evidence.length} results found</span><h1>{filter === 'All' ? 'Potential matches' : `${filter} results`}</h1></div><small>Scan {scan.id.slice(0, 8)} · {teaReviewPending ? 'In review' : sourceStatusLabel(scan.status)}</small></div>
 
         <div className="report-grid">
           {visibleEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}
-          {visibleEvidence.length === 0 && <div className="report-empty"><span>⌕</span><h2>No evidence collected</h2><p>{filter === 'All' ? 'This report is empty because its sources are not configured yet.' : `There are no ${filter} items in this report.`}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
+          {visibleEvidence.length === 0 && <div className="report-empty"><span>⌕</span><h2>{teaReviewPending ? 'Review in progress' : 'No evidence collected'}</h2><p>{teaReviewPending ? 'The Tea lookup has been submitted and this report will update automatically.' : filter === 'All' ? 'No matching evidence was returned by completed sources.' : `There are no ${filter} items in this report.`}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
         </div>
 
         <section className="report-section nearby-section"><div><span>⌖</span><div><h2>Nearby public mentions</h2><p>Indexed results tied to the search area</p></div></div>{publicEvidence.length ? <div className="nearby-list">{publicEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <p className="section-empty">Public web search is available after adding a provider key.</p>}</section>
@@ -263,7 +300,7 @@ function ReportLoading() {
 }
 
 function NoReport() {
-  return <main className="report-route-state"><BrandLink /><span className="step-emoji">⌕</span><h1>Report unavailable.</h1><p>No saved report matching this URL belongs to the current private session.</p><div className="report-route-actions"><a href="/report">Open latest report</a><a href="/check">Start a new check →</a></div></main>;
+  return <main className="report-route-state"><BrandLink /><span className="step-emoji">⌕</span><h1>No report yet.</h1><p>Complete a private check in this browser to create a report.</p><div className="report-route-actions"><a href="/check">Start a new check →</a></div></main>;
 }
 
 function BrandLink() {

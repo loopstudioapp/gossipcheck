@@ -12,7 +12,7 @@ type ProviderEvidence = {
 };
 
 type ProviderResult = {
-  status: 'complete' | 'unconfigured' | 'failed';
+  status: 'queued' | 'complete' | 'unconfigured' | 'failed';
   note: string;
   evidence: ProviderEvidence[];
 };
@@ -26,8 +26,8 @@ async function teaProvider(profile: CreateScanRequest): Promise<ProviderResult> 
   const token = setting('TEA_AUTHORIZED_TOKEN');
   if (!endpoint || !token) {
     return {
-      status: 'unconfigured',
-      note: 'No authorized Tea data provider is configured. Import screenshots or links you lawfully possess below.',
+      status: 'queued',
+      note: 'Awaiting a manual Tea review. An authorized analyst must complete this source check.',
       evidence: [],
     };
   }
@@ -117,7 +117,7 @@ export async function runProviders(scanId: string, sessionId: string, profile: C
     const finished = new Date().toISOString();
     const writes: D1PreparedStatement[] = [
       database().prepare('UPDATE source_runs SET status = ?, note = ?, completed_at = ? WHERE scan_id = ? AND source = ?')
-        .bind(result.status, result.note, finished, scanId, provider.name),
+        .bind(result.status, result.note, result.status === 'queued' ? null : finished, scanId, provider.name),
     ];
     for (const item of result.evidence) {
       writes.push(database().prepare(`

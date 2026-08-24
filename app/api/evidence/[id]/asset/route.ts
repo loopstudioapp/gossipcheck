@@ -1,19 +1,24 @@
 import { NextResponse } from 'next/server';
-import { database, ensureSchema, evidenceBucket } from '../../../../../lib/database';
+import { database, ensureSchema, evidenceBucket, sessionIdForReportAccess } from '../../../../../lib/database';
 import { sessionFor } from '../../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
 
-type AssetRow = { object_key: string; mime_type: string | null };
+type AssetRow = { scan_id: string; session_id: string; object_key: string; mime_type: string | null };
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const session = await sessionFor(request);
     const { id } = await context.params;
     await ensureSchema();
-    const row = await database().prepare('SELECT object_key, mime_type FROM evidence WHERE id = ? AND session_id = ? AND object_key IS NOT NULL')
-      .bind(id, session.id).first<AssetRow>();
+    const row = await database().prepare('SELECT scan_id, session_id, object_key, mime_type FROM evidence WHERE id = ? AND object_key IS NOT NULL')
+      .bind(id).first<AssetRow>();
     if (!row) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
+    if (row.session_id !== session.id) {
+      const accessToken = new URL(request.url).searchParams.get('access_token') || '';
+      const accessSessionId = await sessionIdForReportAccess(row.scan_id, accessToken);
+      if (accessSessionId !== row.session_id) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
+    }
     const object = await evidenceBucket().get(row.object_key);
     if (!object) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
     const headers = new Headers({
