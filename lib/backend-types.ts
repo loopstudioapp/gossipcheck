@@ -34,6 +34,7 @@ export type ScanRecord = {
     age: number;
     city: string;
     usernames: string[];
+    photoUrl: string | null;
   };
   sources: SourceRunRecord[];
   evidence: EvidenceRecord[];

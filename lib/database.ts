@@ -18,10 +18,12 @@ CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, session_id TEXT NOT NU
 CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS source_runs (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, source TEXT NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, source TEXT NOT NULL, title TEXT NOT NULL, excerpt TEXT NOT NULL, source_url TEXT, confidence INTEGER NOT NULL DEFAULT 0, reasons_json TEXT NOT NULL DEFAULT '[]', captured_at TEXT NOT NULL, object_key TEXT, mime_type TEXT, dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scan_photos (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL UNIQUE REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, object_key TEXT NOT NULL, mime_type TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS profiles_session_idx ON profiles(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS scans_session_idx ON scans(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS source_runs_scan_idx ON source_runs(scan_id);
 CREATE INDEX IF NOT EXISTS evidence_scan_idx ON evidence(scan_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS scan_photos_session_idx ON scan_photos(session_id, created_at DESC);
 `;
 
 let schemaReady: Promise<void> | undefined;
@@ -54,6 +56,7 @@ type ScanRow = {
   age: number;
   city: string;
   usernames_json: string;
+  has_profile_photo: number;
 };
 
 type SourceRow = {
@@ -126,6 +129,7 @@ export async function hydrateScans(rows: ScanRow[], sessionId: string): Promise<
       age: row.age,
       city: row.city,
       usernames: parseJsonArray(row.usernames_json),
+      photoUrl: row.has_profile_photo ? `/api/scans/${row.id}/photo` : null,
     },
     sources: sources.filter((source) => source.scan_id === row.id).map((source) => ({
       id: source.id,
@@ -154,7 +158,8 @@ export async function getScans(sessionId: string, scanId?: string) {
   await ensureSchema();
   const query = `
     SELECT s.id, s.status, s.created_at, s.completed_at, s.error,
-      p.first_name, p.age, p.city, p.usernames_json
+      p.first_name, p.age, p.city, p.usernames_json,
+      EXISTS(SELECT 1 FROM scan_photos sp WHERE sp.scan_id = s.id AND sp.session_id = s.session_id) AS has_profile_photo
     FROM scans s JOIN profiles p ON p.id = s.profile_id
     WHERE s.session_id = ? ${scanId ? 'AND s.id = ?' : ''}
     ORDER BY s.created_at DESC LIMIT ${scanId ? 1 : 12}

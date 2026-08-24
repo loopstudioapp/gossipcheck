@@ -2,6 +2,8 @@
 
 A local-first, Tea-focused self-search app. It creates persistent scan reports, runs configured source providers, and lets the owner import Tea evidence with private screenshot storage.
 
+The `/check` experience follows a complete 11-step onboarding funnel (identity, search area, education, optional username and photo) before opening a report dashboard with source counts, evidence cards, detail views, nearby public results, photo-search status, and a scan summary. The structure is informed by TeaChecker's public funnel and report, but GossipCheck does not copy its branding, personal report data, fabricated preview posts, or unverified marketing claims.
+
 ## Run locally
 
 ```bash
@@ -15,6 +17,7 @@ Open [http://localhost:3000/check](http://localhost:3000/check). Vinext/Miniflar
 
 - D1 stores anonymous sessions, profiles, scans, source-run status, and evidence metadata.
 - R2 stores evidence screenshots. Images are only returned when the request owns the matching session cookie.
+- Optional onboarding reference photos are also stored in R2 and protected by the same session ownership check.
 - The Tea adapter is deliberately credential-gated. Set `TEA_AUTHORIZED_ENDPOINT` and `TEA_AUTHORIZED_TOKEN` only for a source you are contractually and technically allowed to query.
 - Set `BRAVE_SEARCH_API_KEY` to enable the public-web provider.
 - Without provider credentials, scans still persist and clearly report the source as unconfigured; users can import Tea evidence they lawfully possess. No fake matches are generated.

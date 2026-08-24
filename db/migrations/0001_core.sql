@@ -55,7 +55,17 @@ CREATE TABLE IF NOT EXISTS evidence (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS scan_photos (
+  id TEXT PRIMARY KEY,
+  scan_id TEXT NOT NULL UNIQUE REFERENCES scans(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  object_key TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS profiles_session_idx ON profiles(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS scans_session_idx ON scans(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS source_runs_scan_idx ON source_runs(scan_id);
 CREATE INDEX IF NOT EXISTS evidence_scan_idx ON evidence(scan_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS scan_photos_session_idx ON scan_photos(session_id, created_at DESC);
