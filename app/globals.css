@@ -793,10 +793,10 @@ footer div { display: flex; gap: 20px; }
 .profile-coverage > span:last-child { border-right: 0; }
 .profile-coverage b { font-family: Georgia, serif; font-size: 25px; }
 .profile-coverage small { color: var(--muted); font-size: 9px; font-weight: 750; }
-.profile-actions { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
-.profile-actions button { padding: 10px 15px; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--ink); color: white; box-shadow: 3px 3px 0 var(--lime); font-size: 10px; font-weight: 850; cursor: pointer; }
-.profile-actions button:disabled { opacity: .58; cursor: wait; }
-.profile-actions p { margin: 0; color: #a22d28; font-size: 10px; }
+.result-actions { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
+.result-actions button { padding: 10px 15px; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--ink); color: white; box-shadow: 3px 3px 0 var(--lime); font-size: 10px; font-weight: 850; cursor: pointer; }
+.result-actions button:disabled { opacity: .58; cursor: wait; }
+.result-actions p { margin: 0; color: #a22d28; font-size: 10px; }
 .profile-tile > img,
 .profile-tile > i { background: #c9d3ff; }
 .profile-tile .tile-meta span { background: #e7ecff; }

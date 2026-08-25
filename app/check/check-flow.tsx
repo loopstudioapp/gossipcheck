@@ -65,7 +65,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRecord | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [refreshingPosts, setRefreshingPosts] = useState(false);
   const [refreshingProfiles, setRefreshingProfiles] = useState(false);
+  const [postRefreshError, setPostRefreshError] = useState('');
+  const [profileRefreshError, setProfileRefreshError] = useState('');
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
 
   useEffect(() => {
@@ -205,10 +208,30 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     }
   };
 
+  const refreshPosts = async () => {
+    if (!scan) return;
+    setRefreshingPosts(true);
+    setPostRefreshError('');
+    try {
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      const response = await fetch(`/api/scans/${scan.id}/posts${query}`, { method: 'POST' });
+      const data = await response.json() as { scan?: ScanRecord; error?: string };
+      if (!response.ok || !data.scan) throw new Error(data.error || 'Post discovery could not be completed.');
+      const updatedScan = withAccessToken(data.scan, accessToken);
+      setScan(updatedScan);
+      setHistory((current) => current.map((item) => item.id === updatedScan.id ? updatedScan : item));
+    } catch (caught) {
+      setPostRefreshError(caught instanceof Error ? caught.message : 'Post discovery could not be completed.');
+    } finally {
+      setRefreshingPosts(false);
+    }
+  };
+
   const refreshProfiles = async () => {
     if (!scan) return;
     setRefreshingProfiles(true);
-    setError('');
+    setProfileRefreshError('');
     try {
       const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
       const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
@@ -219,7 +242,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       setScan(updatedScan);
       setHistory((current) => current.map((item) => item.id === updatedScan.id ? updatedScan : item));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Profile discovery could not be completed.');
+      setProfileRefreshError(caught instanceof Error ? caught.message : 'Profile discovery could not be completed.');
     } finally {
       setRefreshingProfiles(false);
     }
@@ -334,6 +357,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
         <section className="report-section result-section posts-section" id="posts">
           <div className="section-heading"><span>01</span><div><h2>Posts</h2><p>All collected posts where other people discuss “{scan.profile.firstName}”, including Tea evidence and public dating conversations.</p></div><b>{postEvidence.length}</b></div>
+          <div className="result-actions"><button type="button" onClick={() => void refreshPosts()} disabled={refreshingPosts}>{refreshingPosts ? 'Searching public conversations…' : publicPostEvidence.length ? 'Refresh public posts' : 'Search public posts'}</button>{postRefreshError && <p role="alert">{postRefreshError}</p>}</div>
           {postEvidence.length > 0 ? <div className="report-grid">{postEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <div className="report-empty"><span>⌕</span><h2>{teaReviewPending ? 'Post review in progress' : 'No posts found yet'}</h2><p>{teaReviewPending ? 'The Tea lookup is still being reviewed and this section will update automatically.' : publicSource?.status === 'unconfigured' ? 'Configure OpenRouter or import Tea evidence to populate this section.' : 'No qualifying public post or Tea evidence was returned for this scan.'}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
           {publicPostEvidence.length > 0 && <p className="section-footnote">Public post results are possible namesakes. Open the source and check the photos, age, location, and context.</p>}
         </section>
@@ -341,7 +365,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <section className="report-section result-section profiles-section" id="profiles">
           <div className="section-heading"><span>02</span><div><h2>Profiles</h2><p>Public profiles found under “{scan.profile.firstName}”, with dating apps prioritized before social networks and face-search matches.</p></div><b>{profileEvidence.length}</b></div>
           <div className="profile-coverage"><span><b>{datingProfileEvidence.length}</b><small>Dating-app profiles</small></span><span><b>{profileEvidence.length - datingProfileEvidence.length - faceEvidence.length}</b><small>Social profiles</small></span><span><b>{faceEvidence.length}</b><small>Face-search profiles</small></span></div>
-          <div className="profile-actions"><button type="button" onClick={() => void refreshProfiles()} disabled={refreshingProfiles}>{refreshingProfiles ? 'Searching dating apps and social profiles…' : profileEvidence.length ? 'Refresh public profiles' : 'Search public profiles'}</button>{error && <p role="alert">{error}</p>}</div>
+          <div className="result-actions"><button type="button" onClick={() => void refreshProfiles()} disabled={refreshingProfiles}>{refreshingProfiles ? 'Searching dating apps and social profiles…' : profileEvidence.length ? 'Refresh public profiles' : 'Search public profiles'}</button>{profileRefreshError && <p role="alert">{profileRefreshError}</p>}</div>
           {profileEvidence.length > 0 ? <div className="report-grid profile-grid">{profileEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <div className="report-empty profiles-empty"><span>◎</span><h2>No public profiles found yet</h2><p>{publicSource?.status === 'failed' ? 'Profile discovery did not complete for this scan.' : publicSource?.status === 'unconfigured' ? 'Configure OpenRouter to search public dating-app and social profile pages.' : scan.profile.photoUrl ? 'No direct public profile page or face-search candidate was returned.' : 'No direct public profile page was returned. Adding a photo on a new scan can also enable face search.'}</p></div>}
           <p className="section-footnote">A matching name or username does not prove a profile belongs to the same person. Verify photos and profile details before drawing conclusions.</p>
         </section>
