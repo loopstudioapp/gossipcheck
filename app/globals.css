@@ -358,6 +358,10 @@ footer div { display: flex; gap: 20px; }
 .history-list i { font-style: normal; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes monitor-pulse {
+  0%, 100% { opacity: .38; transform: scale(.78); }
+  50% { opacity: 1; transform: scale(1.16); text-shadow: 0 0 8px currentColor; }
+}
 
 @media (max-width: 780px) {
   .scan-progress { grid-template-columns: 1fr; }
@@ -382,7 +386,10 @@ footer div { display: flex; gap: 20px; }
   .history-list strong { display: none; }
 }
 
-@media (prefers-reduced-motion: reduce) { .scanner-ring { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .scanner-ring,
+  .monitor-card > span > i { animation: none; }
+}
 
 /* TeaChecker-informed onboarding and report */
 .funnel-page { min-height: 100vh; display: grid; grid-template-rows: auto 4px auto 1fr auto; background: #f7f7f5; color: #171918; }
@@ -463,7 +470,8 @@ footer div { display: flex; gap: 20px; }
 .report-sidebar { position: sticky; top: 0; height: 100vh; padding: 28px 22px; display: flex; flex-direction: column; gap: 16px; border-right: 1px solid #d9ddd7; background: #f8f9f7; overflow-y: auto; }
 .report-sidebar > .funnel-brand { margin: 0 8px 7px; }
 .monitor-card, .report-nav-card, .alerts-card, .recent-card { padding: 18px; border: 1px solid #252825; border-radius: 15px; background: white; }
-.monitor-card > span { color: #62a433; font-family: var(--font-geist-mono), monospace; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.monitor-card > span { display: inline-flex; align-items: center; gap: 6px; color: #62a433; font-family: var(--font-geist-mono), monospace; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.monitor-card > span > i { font-style: normal; line-height: 1; animation: monitor-pulse 1.4s ease-in-out infinite; transform-origin: center; }
 .profile-row { display: flex; align-items: center; gap: 11px; margin: 18px 0 14px; }
 .profile-row > i, .profile-row > img { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid #202420; border-radius: 14px; background: #eaf7d8; object-fit: cover; font-style: normal; font-size: 22px; font-weight: 900; }
 .profile-row h2 { margin: 0; font-family: var(--font-geist-sans), Arial, sans-serif; font-size: 21px; letter-spacing: -.04em; }
@@ -714,7 +722,8 @@ footer div { display: flex; gap: 20px; }
 .alerts-card,
 .recent-card { padding: 19px; border: 2px solid var(--ink); border-radius: 14px; background: var(--paper); box-shadow: 4px 4px 0 var(--ink); }
 .monitor-card { background: #edf5d6; }
-.monitor-card > span { color: var(--blue); font-weight: 900; letter-spacing: .08em; }
+.monitor-card > span { color: var(--blue); font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+.monitor-card > span > i { font-size: 12px; }
 .profile-row > i,
 .profile-row > img { border: 2px solid var(--ink); background: var(--lime); box-shadow: 3px 3px 0 var(--ink); }
 .profile-row h2 { font-family: Georgia, serif; font-size: 27px; }

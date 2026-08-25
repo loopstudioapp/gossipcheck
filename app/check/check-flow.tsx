@@ -332,7 +332,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       <aside className="report-sidebar">
         <BrandLink />
         <section className="monitor-card">
-          <span>● Monitoring profile</span>
+          <span><i aria-hidden="true">●</i> Monitoring profile</span>
           <div className="profile-row">
             {scan.profile.photoUrl ? <img src={scan.profile.photoUrl} alt="Private profile reference" /> : <i>{scan.profile.firstName.charAt(0).toUpperCase()}</i>}
             <div><h2>{scan.profile.firstName}</h2><p>{scan.profile.age} years old</p></div>
