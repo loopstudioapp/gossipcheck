@@ -7,14 +7,14 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://gossipcheck.app'),
-  title: 'GossipCheck — Know what’s public about you',
+  title: 'GossipCheck — Know what they say about you',
   description: 'A private, evidence-first reputation check across supported public sources.',
   icons: {
     icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
     shortcut: '/favicon.svg',
   },
   openGraph: {
-    title: 'GossipCheck — Know what’s public about you',
+    title: 'GossipCheck — Know what they say about you',
     description: 'Private reputation checks with evidence.',
     images: [{ url: '/og.png', width: 1731, height: 909, alt: 'GossipCheck private reputation check' }],
   },

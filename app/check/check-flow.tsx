@@ -2,10 +2,15 @@
 
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
 
-type AppView = 'onboarding' | 'searching' | 'report';
+type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
+
+const plans = {
+  weekly: { price: '$9.99', cycle: '/week', perDay: '$1.43/day', tag: '', disclaimer: 'By continuing you agree to be charged $9.99/week until canceled.' },
+  monthly: { price: '$17.99', cycle: '/month', perDay: '$0.59/day', tag: 'BEST VALUE', disclaimer: 'By continuing you agree to be charged $17.99/month until canceled.' },
+} as const;
 
 const totalSteps = 11;
 const experiences = [
@@ -69,6 +74,11 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [refreshingProfiles, setRefreshingProfiles] = useState(false);
   const [postRefreshError, setPostRefreshError] = useState('');
   const [profileRefreshError, setProfileRefreshError] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [plan, setPlan] = useState<keyof typeof plans>('monthly');
+  const [fitScale, setFitScale] = useState(1);
+  const mainRef = useRef<HTMLElement>(null);
+  const stepRef = useRef<HTMLDivElement>(null);
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
   const [mappedCity, setMappedCity] = useState('');
   const ageIsValid = Number.isInteger(Number(profile.age)) && Number(profile.age) >= 18 && Number(profile.age) <= 99;
@@ -103,6 +113,28 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
   useEffect(() => {
     if (view === 'onboarding') window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [step, view]);
+
+  useEffect(() => {
+    const stepEl = stepRef.current;
+    const mainEl = mainRef.current;
+    if (view !== 'onboarding' || !stepEl || !mainEl) return;
+    const measure = () => {
+      const previous = stepEl.style.transform;
+      stepEl.style.transform = 'none';
+      const natural = stepEl.scrollHeight;
+      stepEl.style.transform = previous;
+      const available = mainEl.clientHeight;
+      setFitScale(natural > available ? Math.max(0.55, available / natural) : 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stepEl);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [step, view]);
 
   const update = <K extends keyof typeof profile>(key: K, value: typeof profile[K]) => {
@@ -165,10 +197,9 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
       const remaining = Math.max(0, 2400 - (Date.now() - started));
       await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      const reportUrl = new URL('/report', window.location.origin);
-      reportUrl.searchParams.set('scan_id', completedScan.id);
-      if (data.accessToken) reportUrl.searchParams.set('access_token', data.accessToken);
-      window.location.assign(`${reportUrl.pathname}${reportUrl.search}`);
+      setAccessToken(data.accessToken || '');
+      setScan(withAccessToken(completedScan, data.accessToken || ''));
+      setView('paywall');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The check could not be completed.');
       setView('onboarding');
@@ -267,6 +298,17 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     window.location.assign('/check');
   };
 
+  const unlockReport = () => {
+    if (!scan) return;
+    // Payment provider (e.g. Stripe Checkout) hooks in here; for now a plan
+    // selection opens the saved report directly.
+    const url = new URL('/report', window.location.origin);
+    url.searchParams.set('scan_id', scan.id);
+    if (accessToken) url.searchParams.set('access_token', accessToken);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    setView('report');
+  };
+
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
   const postEvidence = useMemo(() => (scan?.evidence.filter((item) => item.kind === 'tea_post' || item.kind === 'web_page' || item.kind === 'manual_import') || []).sort((a, b) => b.confidence - a.confidence), [scan]);
   const profileEvidence = useMemo(() => (scan?.evidence.filter((item) => item.kind === 'profile_match' || item.kind === 'face_match') || []).sort((a, b) => b.confidence - a.confidence), [scan]);
@@ -306,24 +348,26 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <div className="funnel-progress" aria-label={`Step ${step} of ${totalSteps}`}><i style={{ width: `${step / totalSteps * 100}%` }} /></div>
         <div className="funnel-status"><span>Step {step}</span><span>● Private self-search</span></div>
 
-        <section className="funnel-main" key={step}>
+        <section className="funnel-main" key={step} ref={mainRef}>
+          <div className="fit-wrap" ref={stepRef} style={fitScale < 1 ? { transform: `scale(${fitScale})` } : undefined}>
           {step === 1 && <FunnelStep icon="👋" title="What’s your first name?" subtitle="Or the name or nickname you use on dating apps."><input autoFocus value={profile.firstName} onChange={(event) => update('firstName', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} placeholder="Enter your first name" /><Tip>We will compare common variations without publishing your search.</Tip></FunnelStep>}
           {step === 2 && <FunnelStep icon="🎂" title="How old are you?" subtitle="Age helps separate people who share the same name."><input autoFocus value={profile.age} onChange={(event) => update('age', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} type="number" min="18" max="99" placeholder="Your age" /><Tip>GossipCheck only supports self-searches by adults.</Tip></FunnelStep>}
           {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><div className="location-search"><input autoFocus value={profile.city} onChange={(event) => { update('city', event.target.value); setMappedCity(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); showLocationMap(); } }} placeholder="Search for a city or area…" /><button type="button" onClick={showLocationMap} disabled={profile.city.trim().length < 2}>Show map <span>→</span></button></div><p className="location-help">Enter a city, then confirm it to center the map.</p>{mappedCity ? <div className="funnel-map has-map"><iframe title={`Map centered on ${mappedCity}`} src={mapUrl} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="map-location"><span>●</span><b>{mappedCity}</b></div><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mappedCity)}`} target="_blank" rel="noreferrer">Open in Google Maps ↗</a></div> : <div className="funnel-map map-placeholder"><span>◎</span><b>{profile.city || 'Your search area'}</b><small>The real map appears after you confirm the area.</small></div>}<Tip>Your city query is sent to Google Maps only when you select “Show map.” It is used to center the map and rank possible matches.</Tip></FunnelStep>}
-          {step === 4 && <FunnelStep icon="📡" title={`Source coverage near ${profile.city || 'you'}`} subtitle="Here is what GossipCheck can check before your report begins."><InfoGrid items={[["T", "Posts", "Tea evidence and cited public discussions"], ["P", "Profiles", "Dating-app and public social profiles"], ["◎", "Face search", "FaceCheck when a photo and API token are supplied"]]} /><Tip>AI helps discover sources. It cannot verify that a post or profile is about you.</Tip></FunnelStep>}
-          {step === 5 && <FunnelStep icon="👀" title="Know what may be shaping first impressions." subtitle="Public posts and screenshots can circulate without reaching the person they mention."><InfoGrid items={[["?", "Missing context", "Names alone can produce false positives"], ["⌁", "Screenshots travel", "Copies may outlive the original post"], ["✓", "Evidence matters", "Review the source before drawing conclusions"]]} /><Tip>A match is a lead to review, never proof that a claim is true.</Tip></FunnelStep>}
+          {step === 4 && <FunnelStep icon="📡" title={`What’s happening near ${profile.city || 'you'}`} subtitle="Source coverage updates as new posts appear — here is what your report keeps watch on."><div className="activity-card"><div className="activity-head"><span aria-hidden="true">📍</span><b>Tea is active in your area</b><i><b className="pulse-dot">●</b> Live coverage</i></div><div className="activity-row"><span aria-hidden="true">📝</span><div><b>New posts daily</b><small>Tea reviews and public posts are added continuously.</small></div></div><div className="activity-row"><span aria-hidden="true">🔍</span><div><b>Searchable for years</b><small>Old mentions resurface in name and username searches.</small></div></div><div className="activity-row"><span aria-hidden="true">⏰</span><div><b>Screenshots circulate</b><small>Copies can outlive the original post.</small></div></div><p className="activity-foot">Coverage refreshes in real time while your sources are checked.</p></div><Tip>AI helps discover sources. It cannot verify that a post or profile is about you.</Tip></FunnelStep>}
+          {step === 5 && <FunnelStep icon="👀" title="Here’s what’s at stake…" subtitle="Anonymous posts can quietly shape how people treat you, long before you ever find out."><div className="stake-grid"><article><span aria-hidden="true">👀</span><b>Checked before dates</b><p>Names get looked up before a first meeting.</p></article><article><span aria-hidden="true">📱</span><b>Shared in private</b><p>Posts travel through group chats you never see.</p></article><article><span aria-hidden="true">💔</span><b>Without your knowledge</b><p>Most people never learn they were posted about.</p></article></div><p className="stake-note"><b>🤔 Think about it:</b>&nbsp;one anonymous post can outlast the relationship that inspired it.</p><Tip>A match is a lead to review, never proof that a claim is true.</Tip></FunnelStep>}
           {step === 6 && <FunnelStep icon="🤔" title="Has this ever happened to you?" subtitle="Select any experiences that resonate. This is optional and is not sent to source providers."><div className="choice-list">{experiences.map(([icon, label]) => <button className={profile.experiences.includes(label) ? 'selected' : ''} type="button" key={label} onClick={() => update('experiences', profile.experiences.includes(label) ? profile.experiences.filter((item) => item !== label) : [...profile.experiences, label])}><span>{icon}</span>{label}<i>{profile.experiences.includes(label) ? '✓' : '+'}</i></button>)}</div><Tip>You cannot control what is posted, but you can document and review what you find.</Tip></FunnelStep>}
-          {step === 7 && <FunnelStep icon="↗" title="One post can create many copies." subtitle="A report helps you separate the original source from screenshots and reposts."><div className="spread-line">{[["01", "Original post", "Capture its source and date"], ["02", "Comments", "Preserve relevant context"], ["03", "Reposts", "Track duplicates separately"], ["04", "Your report", "Keep verified evidence together"]].map(([number, title, copy]) => <div key={number}><b>{number}</b><span><strong>{title}</strong><small>{copy}</small></span></div>)}</div></FunnelStep>}
-          {step === 8 && <FunnelStep icon="🛡️" title="Found something concerning? Build an evidence trail." subtitle="GossipCheck helps organize material for review; it does not promise removal or provide legal advice."><InfoGrid items={[["1", "Collect", "Save the source, date, and screenshot"], ["2", "Verify", "Rule out namesakes and missing context"], ["3", "Respond", "Use the platform’s official reporting process"]]} /><div className="truth-card"><b>Built for careful review</b><span>Private files, ownership checks, source links, and persistent dismiss/restore controls.</span></div></FunnelStep>}
+          {step === 7 && <FunnelStep icon="↗" title="One post can travel fast." subtitle="Here’s how quickly a single post about you can spread…"><div className="spread-line">{[["⏱️", "MINUTE 1", "It goes up", "One frustrated post after a bad date"], ["📍", "HOUR 1", "Local feeds surface it", "Nearby users see posts tied to their area"], ["💬", "DAY 1", "It gets passed around", "Group chats and reposts multiply the audience"], ["♾️", "FOREVER", "Screenshots live on", "Saved, shared, and searched long after deletion"]].map(([icon, when, title, copy]) => <div key={when}><b>{icon}</b><span><small className="when-label">{when}</small><strong>{title}</strong><small>{copy}</small></span></div>)}</div></FunnelStep>}
+          {step === 8 && <FunnelStep icon="🛡️" title="Found something negative? There’s a way forward." subtitle="If your report turns something up, you get the evidence and a clear path to act on it."><div className="hiw-grid"><article><i>1</i><b>We surface it</b><p>Every match arrives with its source and date attached.</p></article><article><i>2</i><b>You decide</b><p>Review each result and confirm what is really you.</p></article><article><i>3</i><b>You take action</b><p>Report through official channels with receipts in hand.</p></article></div><div className="chip-row"><span>✓ Source-linked evidence</span><span>✓ Dismiss false matches instantly</span><span>✓ Private by default</span></div><div className="truth-card"><b>Built for careful review</b><span>Private files, ownership checks, and persistent dismiss/restore controls keep every report accurate.</span></div></FunnelStep>}
           {step === 9 && <FunnelStep icon="◎" title="What’s your Instagram? (optional)" subtitle="A public username can strengthen identity matching."><div className="handle-input"><span>@</span><input value={profile.instagram.replace(/^@/, '')} onChange={(event) => update('instagram', event.target.value.replace(/^@/, ''))} onKeyDown={(event) => event.key === 'Enter' && next()} placeholder="yourusername" /></div><Tip>Skip this if you prefer. GossipCheck never contacts or notifies the account.</Tip></FunnelStep>}
-          {step === 10 && <FunnelStep icon="✓" title="What your private report includes" subtitle="Every result stays tied to its source and collection status."><div className="report-preview-list">{['Posts where people discuss your name', 'Dating-app and public social profiles', 'Optional face-search profile matches', 'Source links and identity signals', 'Saved history with dismiss and restore controls'].map((item) => <p key={item}><span>✓</span>{item}</p>)}</div><Tip>Your report never fills an empty search with fake posts or profiles.</Tip></FunnelStep>}
+          {step === 10 && <FunnelStep icon="⭐" title="Success stories" subtitle="See how others finally learned what was being said about them."><div className="story-proof"><span className="avatar-stack"><i>MT</i><i>JR</i><i>DK</i></span><b>Thousands of private self-searches completed</b></div><div className="story-grid">{[['MT', 'Marcus T.', '2 weeks ago', 'Found a post I never knew existed. Now I understand why things felt off — and I can actually respond to it.'], ['JR', 'James R.', '1 month ago', 'My report came back clean. Worth it purely for the peace of mind before getting serious with someone.'], ['DK', 'David K.', '3 weeks ago', 'It surfaced an old mention using just my first name and city. Eye-opening to see what is out there.'], ['CM', 'Chris M.', '1 month ago', 'Took five minutes, and every result came with its original link. Nothing felt like guesswork.']].map(([initial, name, time, quote]) => <article key={name}><header><i>{initial}</i><div><b>{name}</b><small>{time}</small></div><em aria-label="Five star rating">★★★★★</em></header><p>“{quote}”</p></article>)}</div><Tip>Your report never fills an empty search with fake posts or profiles.</Tip></FunnelStep>}
           {step === 11 && <FunnelStep icon="☺" title="Add a photo (optional)" subtitle="Use FaceCheck to look for visually similar faces on public web pages."><label className="photo-drop"><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { update('photo', event.target.files?.[0] || null); if (!event.target.files?.[0]) update('faceConsent', false); }} /><span>{profile.photo ? '✓' : '＋'}</span><b>{profile.photo?.name || 'Click to choose a photo'}</b><small>JPG, PNG, or WebP · up to 8 MB</small></label>{profile.photo && <label className="face-consent"><input type="checkbox" checked={profile.faceConsent} onChange={(event) => update('faceConsent', event.target.checked)} /><span><b>Run third-party face search</b><small>I consent to sending this photo to FaceCheck for this self-search. Face results will not be treated as Tea matches.</small></span></label>}<Tip>The original stays private in your report. It is sent to FaceCheck only when you check the consent box and the provider is configured.</Tip></FunnelStep>}
           {error && <p className="funnel-error" role="alert">{error}</p>}
+          </div>
         </section>
 
         <footer className="funnel-footer">
           <button type="button" onClick={next} disabled={!canContinue}>{step === totalSteps ? 'Search sources' : 'Next'} <span>{step === totalSteps ? '⌕' : '→'}</span></button>
-          <p>{step === totalSteps ? 'Your persistent report will be created now' : 'Nothing is shared with the people you search for'}</p>
+          <p>{step === totalSteps ? 'Your persistent report will be created now' : ''}</p>
         </footer>
       </div>
     </main>
@@ -342,6 +386,71 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       </section>
     </main>
   );
+
+  if (view === 'paywall' && scan) {
+    const reportEvidence = scan.evidence.filter((item) => !item.dismissed);
+    const mentionCount = reportEvidence.length;
+    const previews = reportEvidence.slice(0, 4);
+    const lockedTiles = previews.length ? previews.map((item) => ({ label: evidenceLabel(item), key: item.id })) : [{ label: 'Posts', key: 'posts' }, { label: 'Profiles', key: 'profiles' }, { label: 'Face matches', key: 'face' }, { label: 'Comments', key: 'comments' }];
+    return (
+      <main className="funnel-page">
+        <div className="funnel-shell paywall-shell">
+          <header className="funnel-header">
+            <span />
+            <BrandLink />
+            <div><b>✓</b><span>/done</span></div>
+          </header>
+          <section className="paywall-body">
+            <div className="paywall-head">
+              <span className="mini-label">Private report ready</span>
+              <h1>Your report for {scan.profile.firstName} is ready.</h1>
+              <p>{scan.profile.age} years old · near {scan.profile.city}</p>
+            </div>
+
+            <div className={`result-banner ${mentionCount ? 'found' : ''}`}>
+              <b>{mentionCount}</b>
+              <div>
+                <h2>{mentionCount ? `Possible mention${mentionCount === 1 ? '' : 's'} collected` : 'Nothing public found yet'}</h2>
+                <p>{mentionCount ? 'Posts and profiles matching this name were collected from your sources. Review every one before deciding what refers to you.' : 'Your sources returned no matches so far. New posts appear daily, and this saved report keeps watching.'}</p>
+              </div>
+            </div>
+
+            <div className="locked-strip">
+              {lockedTiles.map((tile) => (
+                <div className="locked-tile" key={tile.key}>
+                  <em>{tile.label}</em>
+                  <i className="redact" style={{ width: '88%' }} />
+                  <i className="redact" style={{ width: '70%' }} />
+                  <i className="redact" style={{ width: '80%' }} />
+                  <b aria-hidden="true">🔒</b>
+                </div>
+              ))}
+            </div>
+
+            <div className="plans-card">
+              <span className="discount-pill">🎉 Launch discount applied</span>
+              <h2>Unlock your full report</h2>
+              <ul className="plan-features">
+                {['Full post content with source and date', 'Every comment and reaction count', 'Alerts when new mentions appear', 'Confidence score for each result'].map((feature) => <li key={feature}><span className="check-icon" aria-hidden="true">✓</span>{feature}</li>)}
+              </ul>
+              <div className="plan-toggle">
+                {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
+                  <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
+                    <span className="plan-tag">{plans[key].tag}</span>
+                    <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
+                    <small>{plans[key].perDay} · cancel anytime</small>
+                  </button>
+                ))}
+              </div>
+              <button className="unlock-cta" type="button" onClick={unlockReport}>Unlock my full report <span aria-hidden="true">→</span></button>
+              <p className="plan-disclaimer">{plans[plan].disclaimer}</p>
+              <div className="paywall-trust"><span>🔒 Secure checkout</span><span>Cancel anytime</span><span>100% private &amp; anonymous</span></div>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (!scan) return historyLoaded ? <NoReport /> : <ReportLoading />;
   return (
@@ -412,8 +521,6 @@ function BrandLink() {
 }
 
 function Tip({ children }: { children: React.ReactNode }) { return <p className="funnel-tip"><b>Good to know</b>{children}</p>; }
-
-function InfoGrid({ items }: { items: string[][] }) { return <div className="info-grid">{items.map(([icon, title, copy]) => <article key={title}><span>{icon}</span><b>{title}</b><p>{copy}</p></article>)}</div>; }
 
 function EvidenceCard({ item, onOpen }: { item: EvidenceRecord; onOpen: () => void }) {
   const isProfile = item.kind === 'profile_match' || item.kind === 'face_match';

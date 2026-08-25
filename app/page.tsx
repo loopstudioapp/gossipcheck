@@ -55,7 +55,7 @@ export default function Home() {
       <section className="hero" id="top">
         <div className="hero-copy">
           <div className="eyebrow"><span className="live-dot" /> Private reputation check</div>
-          <h1>Know what’s public <em>about you.</em></h1>
+          <h1>Know what they say <em>about you.</em></h1>
           <p className="hero-lede">
             Find public posts that may mention your name or usernames. Every match
             comes with the source, context, and a clear confidence score.
@@ -196,7 +196,6 @@ export default function Home() {
             <input id="name" type="text" placeholder="e.g. Alex or @alexr" />
             <a href="/check">Start my check <span aria-hidden="true">→</span></a>
           </div>
-          <p>Demo only — no information is submitted from this design.</p>
         </div>
       </section>
 
