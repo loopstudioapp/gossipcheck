@@ -70,8 +70,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [postRefreshError, setPostRefreshError] = useState('');
   const [profileRefreshError, setProfileRefreshError] = useState('');
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
+  const [mappedCity, setMappedCity] = useState('');
   const ageIsValid = Number.isInteger(Number(profile.age)) && Number(profile.age) >= 18 && Number(profile.age) <= 99;
-  const canContinue = step === 1 ? Boolean(profile.firstName.trim()) : step === 2 ? ageIsValid : step === 3 ? Boolean(profile.city.trim()) : step === 11 ? !profile.photo || profile.faceConsent : true;
+  const canContinue = step === 1 ? Boolean(profile.firstName.trim()) : step === 2 ? ageIsValid : step === 3 ? Boolean(mappedCity && mappedCity === profile.city.trim()) : step === 11 ? !profile.photo || profile.faceConsent : true;
+  const mapUrl = mappedCity ? `https://www.google.com/maps?q=${encodeURIComponent(mappedCity)}&output=embed` : '';
 
   useEffect(() => {
     fetch('/api/scans').then(async (response) => {
@@ -116,6 +118,13 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     setError('');
     if (step < totalSteps) setStep((current) => current + 1);
     else void runSearch();
+  };
+
+  const showLocationMap = () => {
+    const query = profile.city.trim();
+    if (query.length < 2) return;
+    update('city', query);
+    setMappedCity(query);
   };
 
   const runSearch = async () => {
@@ -300,7 +309,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <section className="funnel-main" key={step}>
           {step === 1 && <FunnelStep icon="👋" title="What’s your first name?" subtitle="Or the name or nickname you use on dating apps."><input autoFocus value={profile.firstName} onChange={(event) => update('firstName', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} placeholder="Enter your first name" /><Tip>We will compare common variations without publishing your search.</Tip></FunnelStep>}
           {step === 2 && <FunnelStep icon="🎂" title="How old are you?" subtitle="Age helps separate people who share the same name."><input autoFocus value={profile.age} onChange={(event) => update('age', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} type="number" min="18" max="99" placeholder="Your age" /><Tip>GossipCheck only supports self-searches by adults.</Tip></FunnelStep>}
-          {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><input autoFocus value={profile.city} onChange={(event) => update('city', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} placeholder="Search for a city or area…" /><div className="funnel-map"><span>◎</span><b>{profile.city || 'Your search area'}</b><small>Location is used only to rank possible matches.</small></div></FunnelStep>}
+          {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><div className="location-search"><input autoFocus value={profile.city} onChange={(event) => { update('city', event.target.value); setMappedCity(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); showLocationMap(); } }} placeholder="Search for a city or area…" /><button type="button" onClick={showLocationMap} disabled={profile.city.trim().length < 2}>Show map <span>→</span></button></div><p className="location-help">Enter a city, then confirm it to center the map.</p>{mappedCity ? <div className="funnel-map has-map"><iframe title={`Map centered on ${mappedCity}`} src={mapUrl} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="map-location"><span>●</span><b>{mappedCity}</b></div><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mappedCity)}`} target="_blank" rel="noreferrer">Open in Google Maps ↗</a></div> : <div className="funnel-map map-placeholder"><span>◎</span><b>{profile.city || 'Your search area'}</b><small>The real map appears after you confirm the area.</small></div>}<Tip>Your city query is sent to Google Maps only when you select “Show map.” It is used to center the map and rank possible matches.</Tip></FunnelStep>}
           {step === 4 && <FunnelStep icon="📡" title={`Source coverage near ${profile.city || 'you'}`} subtitle="Here is what GossipCheck can check before your report begins."><InfoGrid items={[["T", "Posts", "Tea evidence and cited public discussions"], ["P", "Profiles", "Dating-app and public social profiles"], ["◎", "Face search", "FaceCheck when a photo and API token are supplied"]]} /><Tip>AI helps discover sources. It cannot verify that a post or profile is about you.</Tip></FunnelStep>}
           {step === 5 && <FunnelStep icon="👀" title="Know what may be shaping first impressions." subtitle="Public posts and screenshots can circulate without reaching the person they mention."><InfoGrid items={[["?", "Missing context", "Names alone can produce false positives"], ["⌁", "Screenshots travel", "Copies may outlive the original post"], ["✓", "Evidence matters", "Review the source before drawing conclusions"]]} /><Tip>A match is a lead to review, never proof that a claim is true.</Tip></FunnelStep>}
           {step === 6 && <FunnelStep icon="🤔" title="Has this ever happened to you?" subtitle="Select any experiences that resonate. This is optional and is not sent to source providers."><div className="choice-list">{experiences.map(([icon, label]) => <button className={profile.experiences.includes(label) ? 'selected' : ''} type="button" key={label} onClick={() => update('experiences', profile.experiences.includes(label) ? profile.experiences.filter((item) => item !== label) : [...profile.experiences, label])}><span>{icon}</span>{label}<i>{profile.experiences.includes(label) ? '✓' : '+'}</i></button>)}</div><Tip>You cannot control what is posted, but you can document and review what you find.</Tip></FunnelStep>}
