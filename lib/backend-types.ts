@@ -1,6 +1,6 @@
 export type SourceName = 'Tea' | 'Face search' | 'Public web';
 export type SourceStatus = 'queued' | 'running' | 'complete' | 'unconfigured' | 'failed';
-export type EvidenceKind = 'tea_post' | 'face_match' | 'web_page' | 'manual_import';
+export type EvidenceKind = 'tea_post' | 'face_match' | 'profile_match' | 'web_page' | 'manual_import';
 
 export type EvidenceComment = {
   id: string;

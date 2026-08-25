@@ -6,6 +6,7 @@ type GossipEnv = {
   EVIDENCE: R2Bucket;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
+  OPENROUTER_SEARCH_ENGINE?: string;
   TEA_AUTHORIZED_ENDPOINT?: string;
   TEA_AUTHORIZED_TOKEN?: string;
   FACE_CHECK_API_TOKEN?: string;

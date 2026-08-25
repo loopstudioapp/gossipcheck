@@ -3,10 +3,9 @@
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import type { EvidenceRecord, ScanRecord, SourceName } from '../../lib/backend-types';
+import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
 
 type AppView = 'onboarding' | 'searching' | 'report';
-type Filter = 'All' | SourceName;
 
 const totalSteps = 11;
 const experiences = [
@@ -27,7 +26,28 @@ const publicMatchTier = (item: EvidenceRecord) => {
   return 'broad';
 };
 const datingTopic = (item: EvidenceRecord) => item.reasons.find((reason) => reason.startsWith('Dating/gossip topic:'))?.replace('Dating/gossip topic: ', '') || '';
-const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.source === 'Public web' ? publicMatchTier(item) === 'best' ? 'Best profile match' : publicMatchTier(item) === 'close' ? 'Close profile match' : 'Broad name match' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
+const profilePlatform = (item: EvidenceRecord) => {
+  if (item.kind === 'face_match') return 'Face search';
+  if (!item.sourceUrl) return 'Public profile';
+  try {
+    const host = new URL(item.sourceUrl).hostname.replace(/^www\./, '').toLocaleLowerCase();
+    if (host.includes('tinder')) return 'Tinder';
+    if (host.includes('hinge')) return 'Hinge';
+    if (host.includes('bumble')) return 'Bumble';
+    if (host.includes('badoo')) return 'Badoo';
+    if (host.includes('okcupid')) return 'OkCupid';
+    if (host === 'match.com' || host.endsWith('.match.com')) return 'Match';
+    if (host.includes('pof.com')) return 'Plenty of Fish';
+    if (host.includes('instagram')) return 'Instagram';
+    if (host.includes('tiktok')) return 'TikTok';
+    if (host.includes('threads')) return 'Threads';
+    if (host.includes('facebook')) return 'Facebook';
+    return host;
+  } catch {
+    return 'Public profile';
+  }
+};
+const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.kind === 'profile_match' ? `${profilePlatform(item)} profile` : item.kind === 'face_match' ? 'Possible profile match' : item.source === 'Public web' ? publicMatchTier(item) === 'best' ? 'Best post match' : publicMatchTier(item) === 'close' ? 'Close post match' : 'Broad name match' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
 const withAccessToken = (scan: ScanRecord, accessToken: string) => !accessToken ? scan : ({
   ...scan,
   profile: { ...scan.profile, photoUrl: scan.profile.photoUrl ? `${scan.profile.photoUrl}?access_token=${encodeURIComponent(accessToken)}` : null },
@@ -42,10 +62,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [filter, setFilter] = useState<Filter>('All');
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRecord | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [refreshingProfiles, setRefreshingProfiles] = useState(false);
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
 
   useEffect(() => {
@@ -185,17 +205,36 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     }
   };
 
+  const refreshProfiles = async () => {
+    if (!scan) return;
+    setRefreshingProfiles(true);
+    setError('');
+    try {
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      const response = await fetch(`/api/scans/${scan.id}/profiles${query}`, { method: 'POST' });
+      const data = await response.json() as { scan?: ScanRecord; error?: string };
+      if (!response.ok || !data.scan) throw new Error(data.error || 'Profile discovery could not be completed.');
+      const updatedScan = withAccessToken(data.scan, accessToken);
+      setScan(updatedScan);
+      setHistory((current) => current.map((item) => item.id === updatedScan.id ? updatedScan : item));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Profile discovery could not be completed.');
+    } finally {
+      setRefreshingProfiles(false);
+    }
+  };
+
   const startOver = () => {
     window.location.assign('/check');
   };
 
-  const visibleEvidence = useMemo(() => (scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || []).sort((a, b) => b.confidence - a.confidence), [scan, filter]);
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
-  const publicEvidence = scan?.evidence.filter((item) => item.source === 'Public web') || [];
-  const faceEvidence = scan?.evidence.filter((item) => item.source === 'Face search') || [];
-  const bestPublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'best').sort((a, b) => b.confidence - a.confidence);
-  const closePublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'close').sort((a, b) => b.confidence - a.confidence);
-  const broadPublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'broad').sort((a, b) => b.confidence - a.confidence);
+  const postEvidence = useMemo(() => (scan?.evidence.filter((item) => item.kind === 'tea_post' || item.kind === 'web_page' || item.kind === 'manual_import') || []).sort((a, b) => b.confidence - a.confidence), [scan]);
+  const profileEvidence = useMemo(() => (scan?.evidence.filter((item) => item.kind === 'profile_match' || item.kind === 'face_match') || []).sort((a, b) => b.confidence - a.confidence), [scan]);
+  const datingProfileEvidence = profileEvidence.filter((item) => item.kind === 'profile_match' && item.reasons.some((reason) => reason === 'Dating-app profile'));
+  const publicPostEvidence = postEvidence.filter((item) => item.source === 'Public web');
+  const faceEvidence = profileEvidence.filter((item) => item.kind === 'face_match');
   const publicSource = scan?.sources.find((source) => source.name === 'Public web');
   const teaSource = scan?.sources.find((source) => source.name === 'Tea');
   const teaReviewPending = teaSource?.status === 'queued' || teaSource?.status === 'running';
@@ -232,13 +271,13 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         {step === 1 && <FunnelStep icon="👋" title="What’s your first name?" subtitle="Or the name or nickname you use on dating apps."><input autoFocus value={profile.firstName} onChange={(event) => update('firstName', event.target.value)} placeholder="Enter your first name" /><Tip>We will compare common variations without publishing your search.</Tip></FunnelStep>}
         {step === 2 && <FunnelStep icon="🎂" title="How old are you?" subtitle="Age helps separate people who share the same name."><input autoFocus value={profile.age} onChange={(event) => update('age', event.target.value)} type="number" min="18" max="99" placeholder="Your age" /><Tip>GossipCheck only supports self-searches by adults.</Tip></FunnelStep>}
         {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><input autoFocus value={profile.city} onChange={(event) => update('city', event.target.value)} placeholder="Search for a city or area…" /><div className="funnel-map"><span>◎</span><b>{profile.city || 'Your search area'}</b><small>Location is used only to rank possible matches.</small></div></FunnelStep>}
-        {step === 4 && <FunnelStep icon="📡" title={`Source coverage near ${profile.city || 'you'}`} subtitle="Here is what GossipCheck can check before your report begins."><InfoGrid items={[["T", "Tea provider", "Authorized connector or your imports"], ["◎", "Face search", "FaceCheck when a photo and API token are supplied"], ["W", "Public mentions", "OpenRouter searches cited public discussions"]]} /><Tip>AI helps discover sources. It cannot verify that a post is about you or that its claims are true.</Tip></FunnelStep>}
+        {step === 4 && <FunnelStep icon="📡" title={`Source coverage near ${profile.city || 'you'}`} subtitle="Here is what GossipCheck can check before your report begins."><InfoGrid items={[["T", "Posts", "Tea evidence and cited public discussions"], ["P", "Profiles", "Dating-app and public social profiles"], ["◎", "Face search", "FaceCheck when a photo and API token are supplied"]]} /><Tip>AI helps discover sources. It cannot verify that a post or profile is about you.</Tip></FunnelStep>}
         {step === 5 && <FunnelStep icon="👀" title="Know what may be shaping first impressions." subtitle="Public posts and screenshots can circulate without reaching the person they mention."><InfoGrid items={[["?", "Missing context", "Names alone can produce false positives"], ["⌁", "Screenshots travel", "Copies may outlive the original post"], ["✓", "Evidence matters", "Review the source before drawing conclusions"]]} /><Tip>A match is a lead to review, never proof that a claim is true.</Tip></FunnelStep>}
         {step === 6 && <FunnelStep icon="🤔" title="Has this ever happened to you?" subtitle="Select any experiences that resonate. This is optional and is not sent to source providers."><div className="choice-list">{experiences.map(([icon, label]) => <button className={profile.experiences.includes(label) ? 'selected' : ''} type="button" key={label} onClick={() => update('experiences', profile.experiences.includes(label) ? profile.experiences.filter((item) => item !== label) : [...profile.experiences, label])}><span>{icon}</span>{label}<i>{profile.experiences.includes(label) ? '✓' : '+'}</i></button>)}</div><Tip>You cannot control what is posted, but you can document and review what you find.</Tip></FunnelStep>}
         {step === 7 && <FunnelStep icon="↗" title="One post can create many copies." subtitle="A report helps you separate the original source from screenshots and reposts."><div className="spread-line">{[["01", "Original post", "Capture its source and date"], ["02", "Comments", "Preserve relevant context"], ["03", "Reposts", "Track duplicates separately"], ["04", "Your report", "Keep verified evidence together"]].map(([number, title, copy]) => <div key={number}><b>{number}</b><span><strong>{title}</strong><small>{copy}</small></span></div>)}</div></FunnelStep>}
         {step === 8 && <FunnelStep icon="🛡️" title="Found something concerning? Build an evidence trail." subtitle="GossipCheck helps organize material for review; it does not promise removal or provide legal advice."><InfoGrid items={[["1", "Collect", "Save the source, date, and screenshot"], ["2", "Verify", "Rule out namesakes and missing context"], ["3", "Respond", "Use the platform’s official reporting process"]]} /><div className="truth-card"><b>Built for careful review</b><span>Private files, ownership checks, source links, and persistent dismiss/restore controls.</span></div></FunnelStep>}
         {step === 9 && <FunnelStep icon="◎" title="What’s your Instagram? (optional)" subtitle="A public username can strengthen identity matching."><div className="handle-input"><span>@</span><input value={profile.instagram.replace(/^@/, '')} onChange={(event) => update('instagram', event.target.value.replace(/^@/, ''))} placeholder="yourusername" /></div><Tip>Skip this if you prefer. GossipCheck never contacts or notifies the account.</Tip></FunnelStep>}
-        {step === 10 && <FunnelStep icon="✓" title="What your private report includes" subtitle="Every result stays tied to its source and collection status."><div className="report-preview-list">{['Tea evidence and authorized-provider results', 'AI-discovered public mentions with source links', 'Private screenshots and source links', 'Identity confidence based on visible signals', 'Saved history with dismiss and restore controls'].map((item) => <p key={item}><span>✓</span>{item}</p>)}</div><Tip>Your report never fills an empty search with fake posts or treats AI output as evidence.</Tip></FunnelStep>}
+        {step === 10 && <FunnelStep icon="✓" title="What your private report includes" subtitle="Every result stays tied to its source and collection status."><div className="report-preview-list">{['Posts where people discuss your name', 'Dating-app and public social profiles', 'Optional face-search profile matches', 'Source links and identity signals', 'Saved history with dismiss and restore controls'].map((item) => <p key={item}><span>✓</span>{item}</p>)}</div><Tip>Your report never fills an empty search with fake posts or profiles.</Tip></FunnelStep>}
         {step === 11 && <FunnelStep icon="☺" title="Add a photo (optional)" subtitle="Use FaceCheck to look for visually similar faces on public web pages."><label className="photo-drop"><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { update('photo', event.target.files?.[0] || null); if (!event.target.files?.[0]) update('faceConsent', false); }} /><span>{profile.photo ? '✓' : '＋'}</span><b>{profile.photo?.name || 'Click to choose a photo'}</b><small>JPG, PNG, or WebP · up to 8 MB</small></label>{profile.photo && <label className="face-consent"><input type="checkbox" checked={profile.faceConsent} onChange={(event) => update('faceConsent', event.target.checked)} /><span><b>Run third-party face search</b><small>I consent to sending this photo to FaceCheck for this self-search. Face results will not be treated as Tea matches.</small></span></label>}<Tip>The original stays private in your report. It is sent to FaceCheck only when you check the consent box and the provider is configured.</Tip></FunnelStep>}
         {error && <p className="funnel-error" role="alert">{error}</p>}
       </section>
@@ -258,7 +297,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <h1>Searching for {profile.firstName}</h1>
         <p>Age {profile.age} · Near {profile.city}</p>
         <div className="search-meter"><i style={{ width: `${Math.min(100, (scanStage + 1) * 25)}%` }} /></div>
-        <strong>{['Creating your private report…', 'Checking Tea access…', 'Searching what people are saying…', 'Validating source citations…'][scanStage]}</strong>
+        <strong>{['Creating your private report…', 'Checking Tea access…', 'Searching posts and profiles…', 'Validating source citations…'][scanStage]}</strong>
         <div className="search-facts"><span>● No fake preview posts</span><span>● Source status saved</span><span>● Owner-only files</span></div>
       </section>
     </main>
@@ -279,12 +318,11 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         </section>
         <section className="report-nav-card">
           <h3>Results</h3>
-          <button className={filter === 'Tea' ? 'active tea' : ''} onClick={() => setFilter(filter === 'Tea' ? 'All' : 'Tea')} type="button"><span><b>Tea evidence</b><small>Matching this search</small></span><i>{teaEvidence.length}</i></button>
-          <button className={filter === 'Face search' ? 'active web' : ''} onClick={() => setFilter(filter === 'Face search' ? 'All' : 'Face search')} type="button"><span><b>Face search</b><small>Similar faces on the web</small></span><i>{faceEvidence.length}</i></button>
-          <button className={filter === 'Public web' ? 'active web' : ''} onClick={() => setFilter(filter === 'Public web' ? 'All' : 'Public web')} type="button"><span><b>Dating mentions</b><small>Tea, behavior, and relationship posts</small></span><i>{publicEvidence.length}</i></button>
+          <button className="section-link posts-link" onClick={() => document.getElementById('posts')?.scrollIntoView({ behavior: 'smooth' })} type="button"><span><b>Posts</b><small>Everything said about this name</small></span><i>{postEvidence.length}</i></button>
+          <button className="section-link profiles-link" onClick={() => document.getElementById('profiles')?.scrollIntoView({ behavior: 'smooth' })} type="button"><span><b>Profiles</b><small>Dating apps and public profiles</small></span><i>{profileEvidence.length}</i></button>
         </section>
         <section className="alerts-card"><h3>🔔 Source alerts</h3><p>Scheduled notifications require a delivery provider. Your current report stays saved locally.</p><button type="button" disabled>Alerts not configured</button></section>
-        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); setFilter('All'); window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(item.id)}`); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
+        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(item.id)}`); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
         <button className="new-search" type="button" onClick={startOver}>＋ New self-search</button>
       </aside>
 
@@ -292,23 +330,26 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <header className="report-topbar"><BrandLink /><span>PRIVATE REPUTATION REPORT</span><button type="button" onClick={() => setImportOpen(true)}>＋ Add Tea evidence</button></header>
         <div className={`report-alert ${teaEvidence.length ? 'found' : ''} ${teaReviewPending ? 'pending' : ''}`}><span>{teaEvidence.length ? '!' : teaReviewPending ? '…' : 'i'}</span><div><h3>{teaEvidence.length ? 'Potential Tea evidence collected' : teaReviewPending ? 'Tea review is queued' : teaSourceIssue ? 'Tea check needs attention' : 'No Tea evidence found'}</h3><p>{teaEvidence.length ? `${teaEvidence.length} item${teaEvidence.length === 1 ? '' : 's'} in this report. Review each one before deciding whether it refers to you.` : teaReviewPending ? 'Your identifiers are saved and waiting for an authorized analyst or configured Tea connector. This report refreshes automatically when the review is completed.' : teaSourceIssue ? teaSource?.note : 'The Tea source check completed without evidence. You can still import material you lawfully possess.'}</p></div></div>
 
-        <div className="report-heading-row"><div><span>{scan.evidence.length} results found</span><h1>{filter === 'All' ? 'Potential matches' : `${filter} results`}</h1></div><small>Scan {scan.id.slice(0, 8)} · {teaReviewPending ? 'In review' : sourceStatusLabel(scan.status)}</small></div>
+        <div className="report-heading-row"><div><span>{postEvidence.length + profileEvidence.length} results found</span><h1>What we found for {scan.profile.firstName}</h1></div><small>Scan {scan.id.slice(0, 8)} · {teaReviewPending ? 'In review' : sourceStatusLabel(scan.status)}</small></div>
 
-        <div className="report-grid">
-          {visibleEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}
-          {visibleEvidence.length === 0 && <div className="report-empty"><span>⌕</span><h2>{teaReviewPending ? 'Review in progress' : 'No evidence collected'}</h2><p>{teaReviewPending ? 'The Tea lookup has been submitted and this report will update automatically.' : filter === 'All' ? 'No matching evidence was returned by completed sources.' : `There are no ${filter} items in this report.`}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
-        </div>
+        <section className="report-section result-section posts-section" id="posts">
+          <div className="section-heading"><span>01</span><div><h2>Posts</h2><p>All collected posts where other people discuss “{scan.profile.firstName}”, including Tea evidence and public dating conversations.</p></div><b>{postEvidence.length}</b></div>
+          {postEvidence.length > 0 ? <div className="report-grid">{postEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <div className="report-empty"><span>⌕</span><h2>{teaReviewPending ? 'Post review in progress' : 'No posts found yet'}</h2><p>{teaReviewPending ? 'The Tea lookup is still being reviewed and this section will update automatically.' : publicSource?.status === 'unconfigured' ? 'Configure OpenRouter or import Tea evidence to populate this section.' : 'No qualifying public post or Tea evidence was returned for this scan.'}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
+          {publicPostEvidence.length > 0 && <p className="section-footnote">Public post results are possible namesakes. Open the source and check the photos, age, location, and context.</p>}
+        </section>
 
-        <section className="report-section nearby-section"><div><span>⌖</span><div><h2>Ranked dating-reputation pool</h2><p>Only tea requests, dating context, behavior, treatment, warnings, and green/red flags</p></div></div>{publicSource?.note && <p className="source-method">{publicSource.note}</p>}{publicEvidence.length ? <div className="match-tier-list"><EvidenceGroup title="Best matches" copy="Dating/gossip content plus username, or both age and location" items={bestPublicEvidence} onOpen={setSelectedEvidence} /><EvidenceGroup title="Close matches" copy="Dating/gossip content plus age or location" items={closePublicEvidence} onOpen={setSelectedEvidence} /><EvidenceGroup title="Broad namesakes" copy="Dating/gossip content with a name or nickname match only" items={broadPublicEvidence} onOpen={setSelectedEvidence} /></div> : <p className="section-empty">{publicSource?.status === 'failed' ? publicSource.note : publicSource?.status === 'unconfigured' ? 'Add an OpenRouter API key to run the cited dating-reputation search.' : 'No indexed dating/gossip social citation was returned. Generic mentions, news, blogs, profiles, and owned posts are intentionally excluded.'}</p>}</section>
-
-        <section className="report-section photo-section"><div><span>◎</span><div><h2>Face-search results</h2><p>Public web pages returned by FaceCheck, separate from Tea</p></div></div><div className="photo-status">{scan.profile.photoUrl ? <img src={scan.profile.photoUrl} alt="Private profile reference" /> : <i>＋</i>}<span><b>{faceEvidence.length ? `${faceEvidence.length} possible face match${faceEvidence.length === 1 ? '' : 'es'}` : scan.profile.photoUrl ? 'Reference photo saved privately' : 'No reference photo added'}</b><small>{scan.sources.find((source) => source.name === 'Face search')?.note || 'No face-search run recorded.'}</small></span><em>{faceEvidence.length ? 'Review' : 'Optional'}</em></div>{faceEvidence.length > 0 && <div className="nearby-list">{faceEvidence.slice(0, 8).map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div>}</section>
-
-        <section className="report-section summary-section"><div><span>✓</span><div><h2>Summary</h2><p>What this scan actually completed</p></div></div><ul><li>{teaEvidence.length} Tea candidate{teaEvidence.length === 1 ? '' : 's'} stored</li><li>{faceEvidence.length} FaceCheck web candidate{faceEvidence.length === 1 ? '' : 's'} stored</li><li>{publicEvidence.length} source-cited public mention candidate{publicEvidence.length === 1 ? '' : 's'} stored</li>{scan.sources.map((source) => <li key={source.id}>{source.name}: {sourceStatusLabel(source.status)} — {source.note}</li>)}<li>Identity confidence is not a truth score for any allegation</li></ul></section>
+        <section className="report-section result-section profiles-section" id="profiles">
+          <div className="section-heading"><span>02</span><div><h2>Profiles</h2><p>Public profiles found under “{scan.profile.firstName}”, with dating apps prioritized before social networks and face-search matches.</p></div><b>{profileEvidence.length}</b></div>
+          <div className="profile-coverage"><span><b>{datingProfileEvidence.length}</b><small>Dating-app profiles</small></span><span><b>{profileEvidence.length - datingProfileEvidence.length - faceEvidence.length}</b><small>Social profiles</small></span><span><b>{faceEvidence.length}</b><small>Face-search profiles</small></span></div>
+          <div className="profile-actions"><button type="button" onClick={() => void refreshProfiles()} disabled={refreshingProfiles}>{refreshingProfiles ? 'Searching dating apps and social profiles…' : profileEvidence.length ? 'Refresh public profiles' : 'Search public profiles'}</button>{error && <p role="alert">{error}</p>}</div>
+          {profileEvidence.length > 0 ? <div className="report-grid profile-grid">{profileEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <div className="report-empty profiles-empty"><span>◎</span><h2>No public profiles found yet</h2><p>{publicSource?.status === 'failed' ? 'Profile discovery did not complete for this scan.' : publicSource?.status === 'unconfigured' ? 'Configure OpenRouter to search public dating-app and social profile pages.' : scan.profile.photoUrl ? 'No direct public profile page or face-search candidate was returned.' : 'No direct public profile page was returned. Adding a photo on a new scan can also enable face search.'}</p></div>}
+          <p className="section-footnote">A matching name or username does not prove a profile belongs to the same person. Verify photos and profile details before drawing conclusions.</p>
+        </section>
       </section>
 
       {importOpen && <div className="report-modal" role="dialog" aria-modal="true"><button className="modal-close" type="button" onClick={() => { setImportOpen(false); setError(''); }}>×</button><form className="import-modal" onSubmit={importEvidence}><span className="modal-tea">T</span><h2>Import Tea evidence</h2><p>Add only material you are allowed to possess and process.</p><label>Short title<input name="title" required maxLength={160} placeholder="Tea post mentioning me" /></label><label>Relevant post text<textarea name="excerpt" required maxLength={1200} rows={5} placeholder="Paste the relevant portion…" /></label><div><label>Source link (optional)<input name="sourceUrl" type="url" placeholder="https://…" /></label><label>Date seen<input name="capturedAt" type="date" /></label></div><label>Private screenshot<input name="image" type="file" accept="image/jpeg,image/png,image/webp" /></label>{error && <p className="funnel-error">{error}</p>}<button type="submit" disabled={importing}>{importing ? 'Saving…' : 'Save to report'}</button></form></div>}
 
-      {selectedEvidence && <div className="report-modal detail-modal" role="dialog" aria-modal="true"><button className="modal-close" type="button" onClick={() => setSelectedEvidence(null)}>×</button><article>{selectedEvidence.imageUrl && <img src={selectedEvidence.imageUrl} alt="Evidence preview" />}<div className="detail-head"><span>{evidenceLabel(selectedEvidence)}</span><b>{selectedEvidence.confidence}% identity confidence</b><small>{selectedEvidence.capturedAt.slice(0, 10)}</small></div><h2>{selectedEvidence.title}</h2><p>{selectedEvidence.excerpt}</p><div className="reason-row">{selectedEvidence.reasons.map((reason) => <span key={reason}>✓ {reason}</span>)}</div><div className="reason-row"><span>Provider: {selectedEvidence.provider}</span>{selectedEvidence.subjectAge !== null && <span>Subject age: {selectedEvidence.subjectAge}</span>}{selectedEvidence.subjectLocation && <span>Location: {selectedEvidence.subjectLocation}</span>}{selectedEvidence.kind === 'tea_post' && <span>🚩 {selectedEvidence.redFlags} · 💚 {selectedEvidence.greenFlags}</span>}</div><section><h3>Comments ({selectedEvidence.commentCount})</h3>{selectedEvidence.comments.length ? selectedEvidence.comments.map((comment) => <p key={comment.id}><b>{comment.author}</b> {comment.text}{comment.reactions ? ` · ${comment.reactions} reactions` : ''}</p>) : <p>No comment text was supplied by this provider.</p>}</section><div className="detail-actions">{selectedEvidence.sourceUrl && <a href={selectedEvidence.sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a>}<button type="button" onClick={() => toggleDismissed(selectedEvidence)}>{selectedEvidence.dismissed ? 'Restore evidence' : 'Mark as not me'}</button></div></article></div>}
+      {selectedEvidence && <div className="report-modal detail-modal" role="dialog" aria-modal="true"><button className="modal-close" type="button" onClick={() => setSelectedEvidence(null)}>×</button><article>{selectedEvidence.imageUrl && <img src={selectedEvidence.imageUrl} alt="Evidence preview" />}<div className="detail-head"><span>{evidenceLabel(selectedEvidence)}</span><b>{selectedEvidence.confidence}% identity confidence</b><small>{selectedEvidence.capturedAt.slice(0, 10)}</small></div><h2>{selectedEvidence.title}</h2><p>{selectedEvidence.excerpt}</p><div className="reason-row">{selectedEvidence.reasons.map((reason) => <span key={reason}>✓ {reason}</span>)}</div><div className="reason-row"><span>Provider: {selectedEvidence.provider}</span>{selectedEvidence.subjectAge !== null && <span>Subject age: {selectedEvidence.subjectAge}</span>}{selectedEvidence.subjectLocation && <span>Location: {selectedEvidence.subjectLocation}</span>}{selectedEvidence.kind === 'tea_post' && <span>🚩 {selectedEvidence.redFlags} · 💚 {selectedEvidence.greenFlags}</span>}</div>{selectedEvidence.kind !== 'profile_match' && selectedEvidence.kind !== 'face_match' && <section><h3>Comments ({selectedEvidence.commentCount})</h3>{selectedEvidence.comments.length ? selectedEvidence.comments.map((comment) => <p key={comment.id}><b>{comment.author}</b> {comment.text}{comment.reactions ? ` · ${comment.reactions} reactions` : ''}</p>) : <p>No comment text was supplied by this provider.</p>}</section>}<div className="detail-actions">{selectedEvidence.sourceUrl && <a href={selectedEvidence.sourceUrl} target="_blank" rel="noreferrer">{selectedEvidence.kind === 'profile_match' || selectedEvidence.kind === 'face_match' ? 'Open profile ↗' : 'Open source ↗'}</a>}<button type="button" onClick={() => toggleDismissed(selectedEvidence)}>{selectedEvidence.dismissed ? 'Restore evidence' : 'Mark as not me'}</button></div></article></div>}
     </main>
   );
 }
@@ -333,11 +374,8 @@ function Tip({ children }: { children: React.ReactNode }) { return <p className=
 
 function InfoGrid({ items }: { items: string[][] }) { return <div className="info-grid">{items.map(([icon, title, copy]) => <article key={title}><span>{icon}</span><b>{title}</b><p>{copy}</p></article>)}</div>; }
 
-function EvidenceGroup({ title, copy, items, onOpen }: { title: string; copy: string; items: EvidenceRecord[]; onOpen: (item: EvidenceRecord) => void }) {
-  if (!items.length) return null;
-  return <section className="match-tier"><header><h3>{title}</h3><span>{items.length}</span><p>{copy}</p></header><div className="nearby-list">{items.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => onOpen(item)} />)}</div></section>;
-}
-
 function EvidenceCard({ item, onOpen }: { item: EvidenceRecord; onOpen: () => void }) {
-  return <button className={`evidence-tile ${item.dismissed ? 'dismissed' : ''}`} type="button" onClick={onOpen}>{item.imageUrl ? <img src={item.imageUrl} alt="Evidence preview" /> : <i>{item.source === 'Tea' ? 'T' : item.source === 'Face search' ? '◎' : 'W'}</i>}<div><div className="tile-meta"><span>{evidenceLabel(item)}</span><b>{item.confidence}%</b><small>{item.capturedAt.slice(0, 10)}</small></div><h3>{item.title}</h3><p>{item.excerpt}</p><footer><span>{item.redFlags ? `🚩 ${item.redFlags}` : datingTopic(item) || (item.source === 'Public web' && item.confidence < 50 ? 'Possible namesake' : 'Identity candidate')}</span><span>▢ {item.commentCount}</span><em>{item.dismissed ? 'Dismissed' : 'Open details →'}</em></footer></div></button>;
+  const isProfile = item.kind === 'profile_match' || item.kind === 'face_match';
+  const fallbackIcon = item.source === 'Tea' ? 'T' : item.kind === 'profile_match' ? 'P' : item.source === 'Face search' ? '◎' : 'W';
+  return <button className={`evidence-tile ${isProfile ? 'profile-tile' : ''} ${item.dismissed ? 'dismissed' : ''}`} type="button" onClick={onOpen}>{item.imageUrl ? <img src={item.imageUrl} alt="Evidence preview" /> : <i>{fallbackIcon}</i>}<div><div className="tile-meta"><span>{evidenceLabel(item)}</span><b>{item.confidence}%</b><small>{item.capturedAt.slice(0, 10)}</small></div><h3>{item.title}</h3><p>{item.excerpt}</p><footer><span>{isProfile ? profilePlatform(item) : item.redFlags ? `🚩 ${item.redFlags}` : datingTopic(item) || (item.source === 'Public web' && item.confidence < 50 ? 'Possible namesake' : 'Identity candidate')}</span>{!isProfile && <span>▢ {item.commentCount}</span>}<em>{item.dismissed ? 'Dismissed' : isProfile ? 'View profile →' : 'Open details →'}</em></footer></div></button>;
 }
