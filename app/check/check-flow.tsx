@@ -18,7 +18,15 @@ const experiences = [
 ];
 
 const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'queued' || status === 'running' ? 'In review' : status === 'unconfigured' ? 'Needs setup' : status;
-const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
+const publicMatchTier = (item: EvidenceRecord) => {
+  const hasAge = item.reasons.some((reason) => reason.startsWith('Age ') || reason.startsWith('An age mentioned'));
+  const hasLocation = item.reasons.some((reason) => reason.startsWith('Location signal'));
+  const hasUsername = item.reasons.some((reason) => reason.startsWith('Username '));
+  if (hasUsername || (hasAge && hasLocation)) return 'best';
+  if (hasAge || hasLocation) return 'close';
+  return 'broad';
+};
+const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.source === 'Public web' ? publicMatchTier(item) === 'best' ? 'Best profile match' : publicMatchTier(item) === 'close' ? 'Close profile match' : 'Broad name match' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
 const withAccessToken = (scan: ScanRecord, accessToken: string) => !accessToken ? scan : ({
   ...scan,
   profile: { ...scan.profile, photoUrl: scan.profile.photoUrl ? `${scan.profile.photoUrl}?access_token=${encodeURIComponent(accessToken)}` : null },
@@ -180,10 +188,13 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     window.location.assign('/check');
   };
 
-  const visibleEvidence = useMemo(() => scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || [], [scan, filter]);
+  const visibleEvidence = useMemo(() => (scan?.evidence.filter((item) => filter === 'All' || item.source === filter) || []).sort((a, b) => b.confidence - a.confidence), [scan, filter]);
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
   const publicEvidence = scan?.evidence.filter((item) => item.source === 'Public web') || [];
   const faceEvidence = scan?.evidence.filter((item) => item.source === 'Face search') || [];
+  const bestPublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'best').sort((a, b) => b.confidence - a.confidence);
+  const closePublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'close').sort((a, b) => b.confidence - a.confidence);
+  const broadPublicEvidence = publicEvidence.filter((item) => publicMatchTier(item) === 'broad').sort((a, b) => b.confidence - a.confidence);
   const publicSource = scan?.sources.find((source) => source.name === 'Public web');
   const teaSource = scan?.sources.find((source) => source.name === 'Tea');
   const teaReviewPending = teaSource?.status === 'queued' || teaSource?.status === 'running';
@@ -269,7 +280,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           <h3>Results</h3>
           <button className={filter === 'Tea' ? 'active tea' : ''} onClick={() => setFilter(filter === 'Tea' ? 'All' : 'Tea')} type="button"><span><b>Tea evidence</b><small>Matching this search</small></span><i>{teaEvidence.length}</i></button>
           <button className={filter === 'Face search' ? 'active web' : ''} onClick={() => setFilter(filter === 'Face search' ? 'All' : 'Face search')} type="button"><span><b>Face search</b><small>Similar faces on the web</small></span><i>{faceEvidence.length}</i></button>
-          <button className={filter === 'Public web' ? 'active web' : ''} onClick={() => setFilter(filter === 'Public web' ? 'All' : 'Public web')} type="button"><span><b>Public mentions</b><small>Cited discussions about you</small></span><i>{publicEvidence.length}</i></button>
+          <button className={filter === 'Public web' ? 'active web' : ''} onClick={() => setFilter(filter === 'Public web' ? 'All' : 'Public web')} type="button"><span><b>Broad name pool</b><small>Cited candidates and namesakes</small></span><i>{publicEvidence.length}</i></button>
         </section>
         <section className="alerts-card"><h3>🔔 Source alerts</h3><p>Scheduled notifications require a delivery provider. Your current report stays saved locally.</p><button type="button" disabled>Alerts not configured</button></section>
         {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); setFilter('All'); window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(item.id)}`); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
@@ -287,7 +298,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           {visibleEvidence.length === 0 && <div className="report-empty"><span>⌕</span><h2>{teaReviewPending ? 'Review in progress' : 'No evidence collected'}</h2><p>{teaReviewPending ? 'The Tea lookup has been submitted and this report will update automatically.' : filter === 'All' ? 'No matching evidence was returned by completed sources.' : `There are no ${filter} items in this report.`}</p><button type="button" onClick={() => setImportOpen(true)}>Import Tea evidence</button></div>}
         </div>
 
-        <section className="report-section nearby-section"><div><span>⌖</span><div><h2>What people may be saying publicly</h2><p>Name variants + age + location + dating-language searches</p></div></div>{publicSource?.note && <p className="source-method">{publicSource.note}</p>}{publicEvidence.length ? <div className="nearby-list">{publicEvidence.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div> : <p className="section-empty">{publicSource?.status === 'failed' ? publicSource.note : publicSource?.status === 'unconfigured' ? 'Add an OpenRouter API key to run cited public-mention search.' : 'No source-cited public discussions matched enough identity signals.'}</p>}</section>
+        <section className="report-section nearby-section"><div><span>⌖</span><div><h2>Ranked public candidate pool</h2><p>Exact profile combinations first, close matches second, broad namesakes last</p></div></div>{publicSource?.note && <p className="source-method">{publicSource.note}</p>}{publicEvidence.length ? <div className="match-tier-list"><EvidenceGroup title="Best matches" copy="Username, or both age and location, appear with the name" items={bestPublicEvidence} onOpen={setSelectedEvidence} /><EvidenceGroup title="Close matches" copy="The name appears with age or location" items={closePublicEvidence} onOpen={setSelectedEvidence} /><EvidenceGroup title="Broad matches" copy="Name or nickname match only — likely to include other people" items={broadPublicEvidence} onOpen={setSelectedEvidence} /></div> : <p className="section-empty">{publicSource?.status === 'failed' ? publicSource.note : publicSource?.status === 'unconfigured' ? 'Add an OpenRouter API key to run the broad cited name search.' : 'The search completed without an indexed citation. The keyword coverage above is still part of this report.'}</p>}</section>
 
         <section className="report-section photo-section"><div><span>◎</span><div><h2>Face-search results</h2><p>Public web pages returned by FaceCheck, separate from Tea</p></div></div><div className="photo-status">{scan.profile.photoUrl ? <img src={scan.profile.photoUrl} alt="Private profile reference" /> : <i>＋</i>}<span><b>{faceEvidence.length ? `${faceEvidence.length} possible face match${faceEvidence.length === 1 ? '' : 'es'}` : scan.profile.photoUrl ? 'Reference photo saved privately' : 'No reference photo added'}</b><small>{scan.sources.find((source) => source.name === 'Face search')?.note || 'No face-search run recorded.'}</small></span><em>{faceEvidence.length ? 'Review' : 'Optional'}</em></div>{faceEvidence.length > 0 && <div className="nearby-list">{faceEvidence.slice(0, 8).map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => setSelectedEvidence(item)} />)}</div>}</section>
 
@@ -321,6 +332,11 @@ function Tip({ children }: { children: React.ReactNode }) { return <p className=
 
 function InfoGrid({ items }: { items: string[][] }) { return <div className="info-grid">{items.map(([icon, title, copy]) => <article key={title}><span>{icon}</span><b>{title}</b><p>{copy}</p></article>)}</div>; }
 
+function EvidenceGroup({ title, copy, items, onOpen }: { title: string; copy: string; items: EvidenceRecord[]; onOpen: (item: EvidenceRecord) => void }) {
+  if (!items.length) return null;
+  return <section className="match-tier"><header><h3>{title}</h3><span>{items.length}</span><p>{copy}</p></header><div className="nearby-list">{items.map((item) => <EvidenceCard item={item} key={item.id} onOpen={() => onOpen(item)} />)}</div></section>;
+}
+
 function EvidenceCard({ item, onOpen }: { item: EvidenceRecord; onOpen: () => void }) {
-  return <button className={`evidence-tile ${item.dismissed ? 'dismissed' : ''}`} type="button" onClick={onOpen}>{item.imageUrl ? <img src={item.imageUrl} alt="Evidence preview" /> : <i>{item.source === 'Tea' ? 'T' : item.source === 'Face search' ? '◎' : 'W'}</i>}<div><div className="tile-meta"><span>{evidenceLabel(item)}</span><b>{item.confidence}%</b><small>{item.capturedAt.slice(0, 10)}</small></div><h3>{item.title}</h3><p>{item.excerpt}</p><footer><span>{item.redFlags ? `🚩 ${item.redFlags}` : 'Identity candidate'}</span><span>▢ {item.commentCount}</span><em>{item.dismissed ? 'Dismissed' : 'Open details →'}</em></footer></div></button>;
+  return <button className={`evidence-tile ${item.dismissed ? 'dismissed' : ''}`} type="button" onClick={onOpen}>{item.imageUrl ? <img src={item.imageUrl} alt="Evidence preview" /> : <i>{item.source === 'Tea' ? 'T' : item.source === 'Face search' ? '◎' : 'W'}</i>}<div><div className="tile-meta"><span>{evidenceLabel(item)}</span><b>{item.confidence}%</b><small>{item.capturedAt.slice(0, 10)}</small></div><h3>{item.title}</h3><p>{item.excerpt}</p><footer><span>{item.redFlags ? `🚩 ${item.redFlags}` : item.source === 'Public web' && item.confidence < 50 ? 'Possible namesake' : 'Identity candidate'}</span><span>▢ {item.commentCount}</span><em>{item.dismissed ? 'Dismissed' : 'Open details →'}</em></footer></div></button>;
 }
