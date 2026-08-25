@@ -88,9 +88,14 @@ h1, h2 { font-family: Georgia, 'Times New Roman', serif; letter-spacing: -.055em
 .note-two { bottom: 15%; left: -2%; transform: rotate(-5deg); }
 .note-two b { color: var(--blue); font-size: 17px; }
 
-.source-band { min-height: 94px; display: flex; align-items: center; justify-content: center; gap: clamp(20px, 4vw, 64px); padding: 20px; border-block: 1px solid var(--line); background: var(--light); }
+.source-band { min-height: 94px; display: flex; align-items: center; justify-content: center; gap: clamp(15px, 2.5vw, 42px); padding: 20px; border-block: 1px solid var(--line); background: var(--light); }
 .source-title, .source-more { font-family: var(--font-geist-mono), monospace; color: var(--muted); font-size: 9px; letter-spacing: .1em; }
-.source-name { font-family: Georgia, serif; font-weight: 700; font-size: 19px; }
+.source-name { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-family: Georgia, serif; font-weight: 700; font-size: 16px; }
+.source-logo { width: 23px; height: 23px; display: inline-grid; flex: 0 0 auto; place-items: center; color: var(--ink); }
+.source-logo svg { width: 100%; height: 100%; fill: currentColor; }
+.source-logo-tea { width: 30px; height: 30px; padding: 5px; border: 1px solid var(--ink); border-radius: 9px; background: linear-gradient(135deg, var(--lime), #f6d968); color: var(--ink); }
+.source-logo-tea svg, .source-logo-web svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.source-logo-web { color: var(--blue); }
 .source-more { max-width: 140px; line-height: 1.45; }
 
 .explanation { width: min(1180px, calc(100% - 40px)); margin: auto; padding: 120px 0; display: grid; grid-template-columns: .8fr 1.2fr; gap: 90px; }
@@ -171,6 +176,9 @@ footer div { display: flex; gap: 20px; }
   .likely { position: absolute; top: 10px; right: 10px; }
   .note-one { right: -8px; top: 7%; } .note-two { left: -6px; bottom: 5%; }
   .source-title { width: 100%; text-align: center; }
+  .source-name { font-size: 14px; }
+  .source-logo { width: 21px; height: 21px; }
+  .source-logo-tea { width: 28px; height: 28px; }
   .explanation { padding: 85px 0; }
   .steps { grid-template-columns: 1fr; }
   .steps article + article { border-left: 1px solid var(--ink); border-top: 0; }
