@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     return session.attach(NextResponse.json({ scans: await getScans(session.id) }));
   } catch (error) {
     console.error('Could not list scans', error);
-    return NextResponse.json({ error: 'The local scan database is unavailable.' }, { status: 500 });
+    return NextResponse.json({ error: 'The scan database is unavailable.' }, { status: 500 });
   }
 }
 

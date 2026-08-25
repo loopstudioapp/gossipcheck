@@ -1,5 +1,5 @@
 import type { CreateScanRequest, EvidenceKind, SourceName } from './backend-types';
-import { database, evidenceBucket, runtimeEnv } from './database';
+import { database, evidenceBucket, runtimeEnv, type PostgresStatement } from './database';
 
 type ProviderComment = {
   externalId?: string;
@@ -234,7 +234,7 @@ async function faceCheckProvider(scanId: string, profile: CreateScanRequest): Pr
     }
     if (!items.length) throw new Error('search did not complete within 55 seconds');
 
-    const evidence = items.map((entry) => {
+    const evidence = items.map((entry): ProviderEvidence | null => {
       const item = asRecord(entry);
       const url = safeUrl(item.url) || '';
       const score = Math.max(0, Math.min(100, integer(item.score)));
@@ -664,7 +664,7 @@ async function publicWebProvider(_scanId: string, profile: CreateScanRequest): P
 
 async function persistResult(scanId: string, sessionId: string, source: SourceName, result: ProviderResult) {
   const finished = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [];
+  const statements: PostgresStatement[] = [];
   const objectKeys: string[] = [];
   try {
     for (const item of result.evidence) {
@@ -694,7 +694,7 @@ export async function refreshProfileDiscovery(scanId: string, sessionId: string,
   const result = await publicProfileProvider(profile);
   if (result.status !== 'complete') return result;
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [
+  const statements: PostgresStatement[] = [
     database().prepare("DELETE FROM evidence WHERE scan_id = ? AND session_id = ? AND kind = 'profile_match'").bind(scanId, sessionId),
   ];
   for (const item of result.evidence) {
@@ -712,7 +712,7 @@ export async function refreshPostDiscovery(scanId: string, sessionId: string, pr
   const result = await publicPostProvider(profile);
   if (result.status !== 'complete') return result;
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [
+  const statements: PostgresStatement[] = [
     database().prepare("DELETE FROM evidence WHERE scan_id = ? AND session_id = ? AND kind = 'web_page'").bind(scanId, sessionId),
   ];
   for (const item of result.evidence) {

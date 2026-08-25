@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { database, ensureSchema, evidenceBucket, getScans } from '../../../../../lib/database';
+import { database, ensureSchema, evidenceBucket, getScans, type PostgresStatement } from '../../../../../lib/database';
 import { configuredReviewToken, reviewerAuthorized } from '../../../../../lib/review-auth';
 
 export const dynamic = 'force-dynamic';
@@ -52,7 +52,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       : outcome === 'uncertain'
         ? 'Analyst review completed: possible Tea evidence needs customer verification.'
         : 'Analyst review completed: no matching Tea evidence was found.';
-    const writes: D1PreparedStatement[] = [
+    const writes: PostgresStatement[] = [
       database().prepare(`UPDATE source_runs SET status = 'complete', note = ?, completed_at = ? WHERE scan_id = ? AND source = 'Tea'`).bind(note, now, scanId),
     ];
     if (outcome !== 'not_found') {

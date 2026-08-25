@@ -1,9 +1,10 @@
-import { env } from 'cloudflare:workers';
+import { del, get, put } from '@vercel/blob';
+import postgres, { type Sql, type TransactionSql } from 'postgres';
 import type { EvidenceRecord, ScanRecord, SourceName, SourceStatus } from './backend-types';
 
 type GossipEnv = {
-  DB: D1Database;
-  EVIDENCE: R2Bucket;
+  DATABASE_URL?: string;
+  BLOB_READ_WRITE_TOKEN?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
   OPENROUTER_SEARCH_ENGINE?: string;
@@ -13,10 +14,11 @@ type GossipEnv = {
   FACE_CHECK_TESTING_MODE?: string;
 };
 
-export const runtimeEnv = env as unknown as GossipEnv;
+export const runtimeEnv = new Proxy({} as GossipEnv, {
+  get: (_target, property) => process.env[String(property)],
+});
 
 const schema = `
-PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, first_name TEXT NOT NULL, age INTEGER NOT NULL, city TEXT NOT NULL, usernames_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, face_search_consent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
@@ -33,15 +35,139 @@ CREATE INDEX IF NOT EXISTS scan_photos_session_idx ON scan_photos(session_id, cr
 `;
 
 let schemaReady: Promise<void> | undefined;
+let sqlClient: Sql | undefined;
+
+type BoundValue = string | number | boolean | null | Uint8Array;
+
+function positionalSql(query: string) {
+  let index = 0;
+  let quote: "'" | '"' | null = null;
+  let result = '';
+  for (let offset = 0; offset < query.length; offset += 1) {
+    const character = query[offset];
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (query[offset + 1] === quote) {
+          result += query[offset + 1];
+          offset += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (character === '?') {
+      index += 1;
+      result += `$${index}`;
+      continue;
+    }
+    result += character;
+  }
+  return result;
+}
+
+function client() {
+  if (!runtimeEnv.DATABASE_URL) throw new Error('DATABASE_URL is not configured.');
+  sqlClient ??= postgres(runtimeEnv.DATABASE_URL, {
+    max: 4,
+    idle_timeout: 20,
+    connect_timeout: 15,
+    prepare: false,
+  });
+  return sqlClient;
+}
+
+export class PostgresStatement {
+  constructor(readonly query: string, readonly values: BoundValue[] = []) {}
+
+  bind(...values: BoundValue[]) {
+    return new PostgresStatement(this.query, values);
+  }
+
+  private async execute(sql: Sql | TransactionSql = client()) {
+    return sql.unsafe(positionalSql(this.query), this.values);
+  }
+
+  async run() {
+    const result = await this.execute();
+    return { success: true, meta: { changes: Number(result.count || 0) } };
+  }
+
+  async all<T>() {
+    const result = await this.execute();
+    return { success: true, results: result as unknown as T[], meta: { changes: Number(result.count || 0) } };
+  }
+
+  async first<T>() {
+    const result = await this.execute();
+    return (result[0] as T | undefined) || null;
+  }
+
+  async executeWith(sql: TransactionSql) {
+    const result = await this.execute(sql);
+    return { success: true, meta: { changes: Number(result.count || 0) } };
+  }
+}
+
+class PostgresDatabase {
+  prepare(query: string) {
+    return new PostgresStatement(query);
+  }
+
+  async batch(statements: PostgresStatement[]) {
+    return client().begin(async (transaction) => {
+      const results = [];
+      for (const statement of statements) results.push(await statement.executeWith(transaction));
+      return results;
+    });
+  }
+}
+
+const postgresDatabase = new PostgresDatabase();
 
 export function database() {
-  if (!runtimeEnv.DB) throw new Error('The DB binding is not configured.');
-  return runtimeEnv.DB;
+  return postgresDatabase;
 }
 
 export function evidenceBucket() {
-  if (!runtimeEnv.EVIDENCE) throw new Error('The EVIDENCE binding is not configured.');
-  return runtimeEnv.EVIDENCE;
+  if (!runtimeEnv.BLOB_READ_WRITE_TOKEN) throw new Error('BLOB_READ_WRITE_TOKEN is not configured.');
+  return {
+    async put(key: string, value: ArrayBuffer | ArrayBufferView | Blob, options?: {
+      httpMetadata?: { contentType?: string };
+      customMetadata?: Record<string, string>;
+    }) {
+      const body = value instanceof Blob
+        ? value
+        : ArrayBuffer.isView(value)
+          ? Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+          : Buffer.from(value);
+      return put(key, body, {
+        access: 'private',
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: options?.httpMetadata?.contentType,
+      });
+    },
+    async get(key: string) {
+      const result = await get(key, { access: 'private' });
+      if (!result || result.statusCode !== 200) return null;
+      const stream = result.stream;
+      return {
+        body: stream,
+        httpMetadata: { contentType: result.blob.contentType },
+        arrayBuffer: () => new Response(stream).arrayBuffer(),
+      };
+    },
+    async delete(key: string) {
+      await del(key);
+    },
+  };
 }
 
 export async function ensureSchema() {
@@ -49,31 +175,18 @@ export async function ensureSchema() {
     const db = database();
     const statements = schema.split(';').map((statement) => statement.trim()).filter(Boolean);
     await db.batch(statements.map((statement) => db.prepare(statement)));
-    const scanColumns = (await db.prepare('PRAGMA table_info(scans)').all<{ name: string }>()).results;
-    if (!scanColumns.some((column) => column.name === 'access_token_hash')) {
-      await db.prepare('ALTER TABLE scans ADD COLUMN access_token_hash TEXT').run();
-    }
-    if (!scanColumns.some((column) => column.name === 'face_search_consent')) {
-      await db.prepare('ALTER TABLE scans ADD COLUMN face_search_consent INTEGER NOT NULL DEFAULT 0').run();
-    }
-    const evidenceColumns = (await db.prepare('PRAGMA table_info(evidence)').all<{ name: string }>()).results;
-    const additions = [
-      ['kind', "TEXT NOT NULL DEFAULT 'manual_import'"],
-      ['provider', "TEXT NOT NULL DEFAULT 'GossipCheck'"],
-      ['external_id', 'TEXT'],
-      ['provider_score', 'INTEGER'],
-      ['subject_age', 'INTEGER'],
-      ['subject_location', 'TEXT'],
-      ['comment_count', 'INTEGER NOT NULL DEFAULT 0'],
-      ['red_flags', 'INTEGER NOT NULL DEFAULT 0'],
-      ['green_flags', 'INTEGER NOT NULL DEFAULT 0'],
-      ['metadata_json', "TEXT NOT NULL DEFAULT '{}'"],
-    ] as const;
-    for (const [name, definition] of additions) {
-      if (!evidenceColumns.some((column) => column.name === name)) {
-        await db.prepare(`ALTER TABLE evidence ADD COLUMN ${name} ${definition}`).run();
-      }
-    }
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS access_token_hash TEXT').run();
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS face_search_consent INTEGER NOT NULL DEFAULT 0').run();
+    await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'manual_import'").run();
+    await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'GossipCheck'").run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS external_id TEXT').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS provider_score INTEGER').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS subject_age INTEGER').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS subject_location TEXT').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS red_flags INTEGER NOT NULL DEFAULT 0').run();
+    await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS green_flags INTEGER NOT NULL DEFAULT 0').run();
+    await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS metadata_json TEXT NOT NULL DEFAULT '{}'").run();
     await db.prepare("CREATE TABLE IF NOT EXISTS evidence_comments (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE, external_id TEXT, author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, posted_at TEXT, reactions INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)").run();
     await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS scans_access_token_hash_idx ON scans(access_token_hash) WHERE access_token_hash IS NOT NULL').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS evidence_external_idx ON evidence(provider, external_id) WHERE external_id IS NOT NULL').run();
@@ -82,7 +195,7 @@ export async function ensureSchema() {
     await db.prepare("UPDATE evidence SET kind = 'tea_post', provider = 'Legacy Tea connector' WHERE source = 'Tea' AND kind = 'manual_import' AND reasons_json NOT LIKE '%Imported by you%' AND reasons_json NOT LIKE '%Analyst reviewed%'").run();
     await db.prepare(`
       INSERT INTO source_runs (id, scan_id, source, status, note, completed_at)
-      SELECT lower(hex(randomblob(16))), s.id, 'Face search', 'complete', 'Not run for this legacy scan.', s.completed_at
+      SELECT md5(random()::text || clock_timestamp()::text), s.id, 'Face search', 'complete', 'Not run for this legacy scan.', s.completed_at
       FROM scans s
       WHERE NOT EXISTS (SELECT 1 FROM source_runs sr WHERE sr.scan_id = s.id AND sr.source = 'Face search')
     `).run();
@@ -100,7 +213,6 @@ export async function ensureSchema() {
         WHERE e.reasons_json LIKE '%"Example report"%'
       )
     `).run();
-    await db.prepare('PRAGMA optimize').run();
   })().catch((error) => {
     schemaReady = undefined;
     throw error;
@@ -188,7 +300,7 @@ async function sourceRows(scanIds: string[], sessionId: string) {
       (SELECT COUNT(*) FROM evidence e WHERE e.scan_id = sr.scan_id AND e.source = sr.source) AS matches
     FROM source_runs sr JOIN scans s ON s.id = sr.scan_id
     WHERE s.session_id = ? AND sr.scan_id IN (${placeholders})
-    ORDER BY sr.rowid ASC
+    ORDER BY CASE sr.source WHEN 'Tea' THEN 1 WHEN 'Public web' THEN 2 ELSE 3 END ASC
   `).bind(sessionId, ...scanIds);
   return (await statement.all<SourceRow>()).results;
 }
@@ -209,7 +321,7 @@ async function commentRows(evidenceIds: string[]) {
   const placeholders = evidenceIds.map(() => '?').join(',');
   return (await database().prepare(`
     SELECT id, evidence_id, author, text, posted_at, reactions
-    FROM evidence_comments WHERE evidence_id IN (${placeholders}) ORDER BY posted_at ASC, rowid ASC
+    FROM evidence_comments WHERE evidence_id IN (${placeholders}) ORDER BY posted_at ASC NULLS LAST, created_at ASC
   `).bind(...evidenceIds).all<CommentRow>()).results;
 }
 
