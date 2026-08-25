@@ -757,6 +757,7 @@ footer div { display: flex; gap: 20px; }
 .report-section { margin-top: 46px; padding-top: 29px; border-top: 1px solid var(--line); }
 .report-section > div:first-child > span { border: 1.5px solid var(--ink); background: var(--lime); box-shadow: 2px 2px 0 var(--ink); }
 .report-section h2 { font-family: Georgia, serif; font-size: 29px; letter-spacing: -.04em; }
+.report-section .source-method { margin: -4px 0 18px; padding: 12px 15px; border-left: 3px solid var(--blue); background: #eef1ff; color: #4c5460; font-size: 12px; line-height: 1.55; }
 .section-empty,
 .photo-status,
 .summary-section ul { border: 2px solid var(--ink); border-radius: 13px; background: var(--light); box-shadow: 4px 4px 0 var(--ink); }

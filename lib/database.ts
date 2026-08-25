@@ -4,7 +4,8 @@ import type { EvidenceRecord, ScanRecord, SourceName, SourceStatus } from './bac
 type GossipEnv = {
   DB: D1Database;
   EVIDENCE: R2Bucket;
-  BRAVE_SEARCH_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
   TEA_AUTHORIZED_ENDPOINT?: string;
   TEA_AUTHORIZED_TOKEN?: string;
   FACE_CHECK_API_TOKEN?: string;
