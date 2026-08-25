@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://gossipcheck.app'),
   title: 'GossipCheck — Know what’s public about you',
   description: 'A private, evidence-first reputation check across supported public sources.',
+  icons: {
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+    shortcut: '/favicon.svg',
+  },
   openGraph: {
     title: 'GossipCheck — Know what’s public about you',
     description: 'Private reputation checks with evidence.',

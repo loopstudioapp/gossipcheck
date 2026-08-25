@@ -12,7 +12,7 @@ type Source = {
 };
 
 const sources: Source[] = [
-  { label: 'Tea preview', icon: 'tea' },
+  { label: 'Tea', icon: 'tea' },
   { label: 'Reddit', icon: siReddit },
   { label: 'Public web', icon: 'web' },
   { label: 'YouTube', icon: siYoutube },
