@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { database, ensureSchema, evidenceBucket, sessionIdForReportAccess } from '../../../../../lib/database';
+import { database, ensureSchema, evidenceBucket, scanIsEntitled, sessionIdForReportAccess } from '../../../../../lib/database';
 import { sessionFor } from '../../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +19,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       const accessSessionId = await sessionIdForReportAccess(row.scan_id, accessToken);
       if (accessSessionId !== row.session_id) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
     }
+    // Evidence imagery belongs to the paid report.
+    if (!(await scanIsEntitled(row.scan_id))) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
     const object = await evidenceBucket().get(row.object_key);
     if (!object) return session.attach(NextResponse.json({ error: 'Image not found.' }, { status: 404 }));
     const headers = new Headers({

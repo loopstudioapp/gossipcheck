@@ -1,0 +1,8 @@
+Read CLAUDE.md first. Branch grokbot. Replace fake paywall with Tea Checker-like paywall + real Stripe.
+
+Refs: /workspace/teachecker-scrape/summary.md checkout.md report-pi-live.md and https://teachecker.app/checkout
+Keep GossipCheck branding. Prices stay $9.99/wk and $17.99/mo BEST VALUE. No other teachecker payment_intent URLs.
+
+Need: redacted tiles, plan cards, daily-price framing, disclaimers, Stripe Checkout, webhook (signed, idempotent), unlock only after paid via scan_id+access_token.
+Env: STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY STRIPE_PRICE_WEEKLY STRIPE_PRICE_MONTHLY in .env.example. No secrets in repo.
+Do not commit or push. Lint if practical. Update CLAUDE.md when done. Report files changed and how to test.

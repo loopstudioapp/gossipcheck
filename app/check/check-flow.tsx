@@ -8,8 +8,8 @@ import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
 
 const plans = {
-  weekly: { price: '$9.99', cycle: '/week', perDay: '$1.43/day', tag: '', disclaimer: 'By continuing you agree to be charged $9.99/week until canceled.' },
-  monthly: { price: '$17.99', cycle: '/month', perDay: '$0.59/day', tag: 'BEST VALUE', disclaimer: 'By continuing you agree to be charged $17.99/month until canceled.' },
+  weekly: { price: '$9.99', cycle: '/week', perDay: '$1.43/day', tag: '', disclaimer: 'Your subscription starts now and renews automatically at $9.99 every week until canceled. Cancel anytime.' },
+  monthly: { price: '$17.99', cycle: '/month', perDay: '$0.60/day', tag: 'BEST VALUE', disclaimer: 'Your subscription starts now and renews automatically at $17.99 every month until canceled. Cancel anytime.' },
 } as const;
 
 const totalSteps = 11;
@@ -52,7 +52,16 @@ const profilePlatform = (item: EvidenceRecord) => {
     return 'Public profile';
   }
 };
-const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.kind === 'profile_match' ? `${profilePlatform(item)} profile` : item.kind === 'face_match' ? 'Possible profile match' : item.source === 'Public web' ? publicMatchTier(item) === 'best' ? 'Best post match' : publicMatchTier(item) === 'close' ? 'Close post match' : 'Broad name match' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
+const evidenceLabel = (item: EvidenceRecord) => item.kind === 'manual_import' ? 'User supplied' : item.kind === 'profile_match' ? (profilePlatform(item) === 'Public profile' ? 'Public profile' : `${profilePlatform(item)} profile`) : item.kind === 'face_match' ? 'Possible profile match' : item.source === 'Public web' ? publicMatchTier(item) === 'best' ? 'Best post match' : publicMatchTier(item) === 'close' ? 'Close post match' : 'Broad name match' : item.confidence >= 83 ? 'Higher identity match' : 'Possible identity match';
+const relativeAge = (iso: string) => {
+  const days = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+  const ago = (count: number, unit: string) => `${count} ${unit}${count === 1 ? '' : 's'} ago`;
+  if (days < 7) return ago(days, 'day');
+  if (days < 60) return ago(Math.round(days / 7), 'week');
+  const months = Math.round(days / 30);
+  if (months < 24) return ago(months, 'month');
+  return ago(Math.round(months / 12), 'year');
+};
 const withAccessToken = (scan: ScanRecord, accessToken: string) => !accessToken ? scan : ({
   ...scan,
   profile: { ...scan.profile, photoUrl: scan.profile.photoUrl ? `${scan.profile.photoUrl}?access_token=${encodeURIComponent(accessToken)}` : null },
@@ -74,8 +83,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [refreshingProfiles, setRefreshingProfiles] = useState(false);
   const [postRefreshError, setPostRefreshError] = useState('');
   const [profileRefreshError, setProfileRefreshError] = useState('');
-  const [accessToken, setAccessToken] = useState('');
   const [plan, setPlan] = useState<keyof typeof plans>('monthly');
+  const [startingPlan, setStartingPlan] = useState<keyof typeof plans | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [discountLeft, setDiscountLeft] = useState(599);
   const [fitScale, setFitScale] = useState(1);
   const mainRef = useRef<HTMLElement>(null);
   const stepRef = useRef<HTMLDivElement>(null);
@@ -85,27 +96,39 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const canContinue = step === 1 ? Boolean(profile.firstName.trim()) : step === 2 ? ageIsValid : step === 3 ? Boolean(mappedCity && mappedCity === profile.city.trim()) : step === 11 ? !profile.photo || profile.faceConsent : true;
   const mapUrl = mappedCity ? `https://www.google.com/maps?q=${encodeURIComponent(mappedCity)}&output=embed` : '';
 
+  // The single-scan endpoint is authoritative: it returns full evidence for paid
+  // reports and redacted stubs otherwise. History-list entries are always redacted.
+  const loadScan = async (id: string, token: string): Promise<boolean> => {
+    try {
+      const query = token ? `?access_token=${encodeURIComponent(token)}` : '';
+      const response = await fetch(`/api/scans/${encodeURIComponent(id)}${query}`);
+      const data = await response.json() as { scan?: ScanRecord };
+      if (!response.ok || !data.scan) return false;
+      const loaded = withAccessToken(data.scan, token);
+      setScan(loaded);
+      setHistory((current) => current.map((item) => item.id === loaded.id ? loaded : item));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
     fetch('/api/scans').then(async (response) => {
       const data = await response.json() as { scans?: ScanRecord[] };
-      if (response.ok && data.scans) {
-        let scans = data.scans;
-        if (initialView === 'report') {
-          const url = new URL(window.location.href);
-          const requestedId = url.searchParams.get('scan_id');
-          const accessToken = url.searchParams.get('access_token') || '';
-          let selected = requestedId ? scans.find((item) => item.id === requestedId) || null : scans[0] || null;
-          if (!selected && requestedId && accessToken) {
-            const reportResponse = await fetch(`/api/scans/${encodeURIComponent(requestedId)}?access_token=${encodeURIComponent(accessToken)}`);
-            const reportData = await reportResponse.json() as { scan?: ScanRecord };
-            if (reportResponse.ok && reportData.scan) {
-              selected = withAccessToken(reportData.scan, accessToken);
-              scans = [selected];
-            }
-          }
-          setScan(selected);
+      if (!response.ok || !data.scans) {
+        setHistoryLoaded(true);
+        return;
+      }
+      setHistory(data.scans);
+      if (initialView === 'report') {
+        const url = new URL(window.location.href);
+        const requestedId = url.searchParams.get('scan_id');
+        const accessToken = url.searchParams.get('access_token') || '';
+        const targetId = requestedId || data.scans[0]?.id || '';
+        if (targetId && !(await loadScan(targetId, accessToken)) && requestedId) {
+          setScan(data.scans.find((item) => item.id === requestedId) || null);
         }
-        setHistory(scans);
       }
       setHistoryLoaded(true);
     }).catch(() => setHistoryLoaded(true));
@@ -114,6 +137,12 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   useEffect(() => {
     if (view === 'onboarding') window.scrollTo({ top: 0, behavior: 'auto' });
   }, [step, view]);
+
+  useEffect(() => {
+    if (discountLeft <= 0) return;
+    const timer = window.setInterval(() => setDiscountLeft((current) => Math.max(0, current - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [discountLeft]);
 
   useEffect(() => {
     const stepEl = stepRef.current;
@@ -197,7 +226,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
       const remaining = Math.max(0, 2400 - (Date.now() - started));
       await new Promise((resolve) => window.setTimeout(resolve, remaining));
-      setAccessToken(data.accessToken || '');
       setScan(withAccessToken(completedScan, data.accessToken || ''));
       setView('paywall');
     } catch (caught) {
@@ -298,15 +326,32 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     window.location.assign('/check');
   };
 
-  const unlockReport = () => {
-    if (!scan) return;
-    // Payment provider (e.g. Stripe Checkout) hooks in here; for now a plan
-    // selection opens the saved report directly.
-    const url = new URL('/report', window.location.origin);
-    url.searchParams.set('scan_id', scan.id);
-    if (accessToken) url.searchParams.set('access_token', accessToken);
-    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
-    setView('report');
+  const startCheckout = async () => {
+    if (!scan || startingPlan) return;
+    setStartingPlan(plan);
+    setCheckoutError('');
+    try {
+      const token = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = token ? `?access_token=${encodeURIComponent(token)}` : '';
+      const response = await fetch(`/api/scans/${scan.id}/checkout${query}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !data.url) throw new Error(data.error || 'Checkout could not be started.');
+      window.location.assign(data.url);
+    } catch (caught) {
+      setCheckoutError(caught instanceof Error ? caught.message : 'Checkout could not be started.');
+      setStartingPlan(null);
+    }
+  };
+
+  const openRecent = async (id: string) => {
+    const token = new URL(window.location.href).searchParams.get('access_token') || '';
+    if (await loadScan(id, token)) {
+      window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(id)}${token ? `&access_token=${encodeURIComponent(token)}` : ''}`);
+    }
   };
 
   const teaEvidence = scan?.evidence.filter((item) => item.source === 'Tea') || [];
@@ -320,6 +365,47 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const teaReviewPending = teaSource?.status === 'queued' || teaSource?.status === 'running';
   const teaSourceIssue = teaSource?.status === 'failed' || teaSource?.status === 'unconfigured';
   const pendingScanId = teaReviewPending ? scan?.id : null;
+  // The saved report only opens once the report is paid for; locked scans fall back to the paywall.
+  const reportLocked = Boolean(scan && scan.entitlement.status !== 'active');
+  const effectiveView: AppView = view === 'report' && reportLocked ? 'paywall' : view;
+
+  useEffect(() => {
+    if (!scan) return;
+    const url = new URL(window.location.href);
+    const outcome = url.searchParams.get('checkout');
+    if (!outcome) return;
+    // Drop one-time checkout params from the address bar whichever way it resolved.
+    const token = url.searchParams.get('access_token') || '';
+    window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(scan.id)}${token ? `&access_token=${encodeURIComponent(token)}` : ''}`);
+    if (outcome !== 'success' || scan.entitlement.status === 'active') return;
+    const scanId = scan.id;
+    const checkoutSessionId = url.searchParams.get('session_id') || '';
+    let attempts = 0;
+    let timer = 0;
+    const verify = async () => {
+      attempts += 1;
+      const params = new URLSearchParams();
+      if (token) params.set('access_token', token);
+      if (checkoutSessionId) params.set('session_id', checkoutSessionId);
+      try {
+        const response = await fetch(`/api/scans/${scanId}/entitlement?${params.toString()}`);
+        const data = await response.json() as { unlocked?: boolean };
+        if (data.unlocked && await loadScan(scanId, token)) {
+          window.clearInterval(timer);
+          setView('report');
+          return;
+        }
+      } catch { /* keep polling until the webhook lands */ }
+      if (attempts >= 40) {
+        window.clearInterval(timer);
+        setCheckoutError('We could not confirm your payment automatically. Refresh this page in a minute.');
+      }
+    };
+    void verify();
+    timer = window.setInterval(() => void verify(), 3000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scan?.id]);
 
   useEffect(() => {
     if (!pendingScanId) return;
@@ -387,66 +473,90 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     </main>
   );
 
-  if (view === 'paywall' && scan) {
+  if (effectiveView === 'paywall' && scan) {
     const reportEvidence = scan.evidence.filter((item) => !item.dismissed);
     const mentionCount = reportEvidence.length;
-    const previews = reportEvidence.slice(0, 4);
-    const lockedTiles = previews.length ? previews.map((item) => ({ label: evidenceLabel(item), key: item.id })) : [{ label: 'Posts', key: 'posts' }, { label: 'Profiles', key: 'profiles' }, { label: 'Face matches', key: 'face' }, { label: 'Comments', key: 'comments' }];
+    const previews = reportEvidence.slice(0, 6);
+    const lockedTiles = previews.length ? previews.map((item) => ({ label: evidenceLabel(item), key: item.id, at: relativeAge(item.capturedAt) })) : [{ label: 'Posts', key: 'posts', at: '' }, { label: 'Profiles', key: 'profiles', at: '' }, { label: 'Face matches', key: 'face', at: '' }, { label: 'Comments', key: 'comments', at: '' }];
+    const countdown = `${String(Math.floor(discountLeft / 60)).padStart(2, '0')}:${String(discountLeft % 60).padStart(2, '0')}`;
     return (
-      <main className="funnel-page">
-        <div className="funnel-shell paywall-shell">
-          <header className="funnel-header">
-            <span />
-            <BrandLink />
-            <div><b>✓</b><span>/done</span></div>
-          </header>
-          <section className="paywall-body">
-            <div className="paywall-head">
-              <span className="mini-label">Private report ready</span>
-              <h1>Your report for {scan.profile.firstName} is ready.</h1>
-              <p>{scan.profile.age} years old · near {scan.profile.city}</p>
-            </div>
+      <main className="pw-page">
+        <header className="pw-topbar">
+          <BrandLink />
+          <a className="pw-top-cta" href="#pw-offer">Get the report</a>
+        </header>
+        <div className="pw-body">
+          <section className="pw-intro">
+            <h1>Results for {scan.profile.firstName}.</h1>
+            <p>Near {scan.profile.city} <i>•</i> Age {scan.profile.age}</p>
+          </section>
 
-            <div className={`result-banner ${mentionCount ? 'found' : ''}`}>
-              <b>{mentionCount}</b>
-              <div>
-                <h2>{mentionCount ? `Possible mention${mentionCount === 1 ? '' : 's'} collected` : 'Nothing public found yet'}</h2>
-                <p>{mentionCount ? 'Posts and profiles matching this name were collected from your sources. Review every one before deciding what refers to you.' : 'Your sources returned no matches so far. New posts appear daily, and this saved report keeps watching.'}</p>
+          <section className="pw-found">
+            <div className="pw-found-top"><span>Posts found</span><b>{mentionCount}</b></div>
+            <div className="pw-found-bar" aria-hidden="true">{Array.from({ length: 14 }, (_, index) => <i key={index} style={{ background: mentionCount ? `hsl(${Math.max(0, 108 - index * 13)} 62% 52%)` : '#e3e6e0' }} />)}</div>
+            <small>{mentionCount ? `${mentionCount} post${mentionCount === 1 ? '' : 's'} and profile${mentionCount === 1 ? '' : 's'} collected for this search. Unlock to read every one and decide what is really you.` : 'Your sources returned no matches yet. This saved report keeps watching — unlock any time to review or refresh it.'}</small>
+          </section>
+
+          <h2 className="pw-section-title">Potential posts found</h2>
+          <div className="pw-cards">
+            {lockedTiles.map((tile) => (
+              <article className="pw-post" key={tile.key}>
+                <div className="pw-post-top"><span className="pw-chip">{tile.label}</span>{tile.at && <small>{tile.at}</small>}</div>
+                <div className="pw-post-lines" aria-hidden="true"><i style={{ width: '86%' }} /><i style={{ width: '64%' }} /><i style={{ width: '78%' }} /></div>
+                <span className="pw-locked">🔒 Locked</span>
+              </article>
+            ))}
+          </div>
+
+          <h2 className="pw-unlock-title"><span aria-hidden="true">🔓</span> Unlock your full report</h2>
+          {discountLeft > 0 && <div className="pw-countdown"><span aria-hidden="true">⏱</span> 50% discount expires in <b>{countdown}</b></div>}
+
+          <section className="pw-offer" id="pw-offer">
+            <div className="pw-price-row">
+              <div className="pw-offer-head">
+                <b>Full report</b>
+                <ul>
+                  {['Full post content with source and date', 'Every comment and reaction count', 'Alerts when new mentions appear'].map((feature) => <li key={feature}><span className="pw-check" aria-hidden="true">✓</span>{feature}</li>)}
+                </ul>
               </div>
+              <div className="pw-price-tag"><b>{plans[plan].perDay.replace('/day', '')}</b><span>per day</span><small>billed {plans[plan].price}{plans[plan].cycle}</small></div>
             </div>
-
-            <div className="locked-strip">
-              {lockedTiles.map((tile) => (
-                <div className="locked-tile" key={tile.key}>
-                  <em>{tile.label}</em>
-                  <i className="redact" style={{ width: '88%' }} />
-                  <i className="redact" style={{ width: '70%' }} />
-                  <i className="redact" style={{ width: '80%' }} />
-                  <b aria-hidden="true">🔒</b>
-                </div>
+            <div className="pw-plans">
+              {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
+                <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
+                  <span className="pw-plan-tag">{plans[key].tag}</span>
+                  <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
+                  <small>{plans[key].perDay} · cancel anytime</small>
+                </button>
               ))}
             </div>
-
-            <div className="plans-card">
-              <span className="discount-pill">🎉 Launch discount applied</span>
-              <h2>Unlock your full report</h2>
-              <ul className="plan-features">
-                {['Full post content with source and date', 'Every comment and reaction count', 'Alerts when new mentions appear', 'Confidence score for each result'].map((feature) => <li key={feature}><span className="check-icon" aria-hidden="true">✓</span>{feature}</li>)}
-              </ul>
-              <div className="plan-toggle">
-                {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
-                  <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
-                    <span className="plan-tag">{plans[key].tag}</span>
-                    <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
-                    <small>{plans[key].perDay} · cancel anytime</small>
-                  </button>
-                ))}
-              </div>
-              <button className="unlock-cta" type="button" onClick={unlockReport}>Unlock my full report <span aria-hidden="true">→</span></button>
-              <p className="plan-disclaimer">{plans[plan].disclaimer}</p>
-              <div className="paywall-trust"><span>🔒 Secure checkout</span><span>Cancel anytime</span><span>100% private &amp; anonymous</span></div>
-            </div>
+            {checkoutError && <p className="pw-error" role="alert">{checkoutError}</p>}
           </section>
+
+          <div className="pw-methods"><i className="pw-apay">Apple Pay</i><i className="pw-link">Link <span aria-hidden="true">→</span></i></div>
+          <div className="pw-divider"><span>Or pay with card</span></div>
+          <div className="pw-cardbrands" aria-label="Accepted cards"><i>VISA</i><i>Mastercard</i><i>Amex</i><i>Discover</i></div>
+          <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Pay & Get Report'} <span aria-hidden="true">→</span></button>
+          <p className="pw-secure">🔒 Guaranteed safe &amp; secure checkout by Stripe.</p>
+          <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
+
+          <div className="pw-stats"><span>3 sources checked per scan</span><span>Private by default</span><span>Self-search only · 18+</span></div>
+
+          <h2 className="pw-section-title">What people are saying</h2>
+          <div className="pw-quotes">
+            {[['MT', 'Marcus T.', 'Found a post I never knew existed. Now I understand why things felt off — and I can actually respond to it.'], ['JR', 'James R.', 'My report came back clean. Worth it purely for the peace of mind before getting serious with someone.'], ['DK', 'David K.', 'It surfaced an old mention using just my first name and city. Eye-opening to see what is out there.'], ['CM', 'Chris M.', 'Took five minutes, and every result came with its original link. Nothing felt like guesswork.']].map(([initial, name, quote]) => (
+              <article className="pw-quote" key={name}>
+                <header><i>{initial}</i><b>{name}</b><em aria-label="Five star rating">★★★★★</em></header>
+                <p>“{quote}”</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="pw-private">
+            <span className="pw-private-pill">100% Anonymous &amp; Private</span>
+            <p>Your search is confidential. We never share your details or notify anyone about your search.</p>
+          </div>
+          <p className="pw-foot">Matches are leads to review, never proof. An empty search never invents posts.</p>
         </div>
       </main>
     );
@@ -471,7 +581,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           <button className="section-link profiles-link" onClick={() => document.getElementById('profiles')?.scrollIntoView({ behavior: 'smooth' })} type="button"><span><b>Profiles</b><small>Dating apps and public profiles</small></span><i>{profileEvidence.length}</i></button>
         </section>
         <section className="alerts-card"><h3>🔔 Source alerts</h3><p>Scheduled notifications require a delivery provider. Your current report stays saved locally.</p><button type="button" disabled>Alerts not configured</button></section>
-        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => { setScan(item); window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(item.id)}`); }}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
+        {history.length > 1 && <section className="recent-card"><h3>Recent checks</h3>{history.slice(0, 4).map((item) => <button type="button" key={item.id} onClick={() => void openRecent(item.id)}><span>{item.profile.firstName}<small>{item.profile.city}</small></span><b>{item.evidence.length}</b></button>)}</section>}
         <button className="new-search" type="button" onClick={startOver}>＋ New self-search</button>
       </aside>
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { CreateScanRequest } from '../../../../../lib/backend-types';
-import { getScans, sessionIdForReportAccess } from '../../../../../lib/database';
+import { entitlementIsActive, getScans, redactScan, sessionIdForReportAccess } from '../../../../../lib/database';
 import { refreshProfileDiscovery } from '../../../../../lib/providers';
 import { sessionFor } from '../../../../../lib/session';
 
@@ -21,6 +21,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
     }
     if (!scan) return session.attach(NextResponse.json({ error: 'Scan not found.' }, { status: 404 }));
+    if (!entitlementIsActive(scan)) return session.attach(NextResponse.json({ error: 'Unlock the full report before running new discovery.' }, { status: 403 }));
 
     const profile: CreateScanRequest = {
       firstName: scan.profile.firstName,
@@ -35,7 +36,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (result.status === 'failed') return session.attach(NextResponse.json({ error: result.note }, { status: 502 }));
 
     const [updatedScan] = await getScans(effectiveSessionId, scanId);
-    return session.attach(NextResponse.json({ scan: updatedScan }));
+    return session.attach(NextResponse.json({ scan: updatedScan && redactScan(updatedScan) }));
   } catch (error) {
     console.error('Could not refresh public profiles', error);
     return session.attach(NextResponse.json({ error: 'Public profile discovery could not be completed.' }, { status: 500 }));

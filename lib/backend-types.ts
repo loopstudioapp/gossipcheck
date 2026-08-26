@@ -1,6 +1,8 @@
 export type SourceName = 'Tea' | 'Face search' | 'Public web';
 export type SourceStatus = 'queued' | 'running' | 'complete' | 'unconfigured' | 'failed';
 export type EvidenceKind = 'tea_post' | 'face_match' | 'profile_match' | 'web_page' | 'manual_import';
+export type EntitlementStatus = 'locked' | 'active' | 'expired';
+export type PlanKey = 'weekly' | 'monthly';
 
 export type EvidenceComment = {
   id: string;
@@ -57,6 +59,13 @@ export type ScanRecord = {
   };
   sources: SourceRunRecord[];
   evidence: EvidenceRecord[];
+  entitlement: { status: EntitlementStatus; plan: PlanKey | null };
+  /** True when the server withheld evidence content because the report is not paid for. */
+  redacted?: boolean;
+};
+
+export type CreateCheckoutRequest = {
+  plan: PlanKey;
 };
 
 export type CreateScanRequest = {

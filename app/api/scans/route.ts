@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { CreateScanRequest } from '../../../lib/backend-types';
-import { database, ensureSchema, getScans } from '../../../lib/database';
+import { database, ensureSchema, getScans, redactScan } from '../../../lib/database';
 import { sessionFor } from '../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,8 @@ const clean = (value: unknown, max: number) => typeof value === 'string' ? value
 export async function GET(request: Request) {
   try {
     const session = await sessionFor(request);
-    return session.attach(NextResponse.json({ scans: await getScans(session.id) }));
+    const scans = (await getScans(session.id)).map(redactScan);
+    return session.attach(NextResponse.json({ scans }));
   } catch (error) {
     console.error('Could not list scans', error);
     return NextResponse.json({ error: 'The scan database is unavailable.' }, { status: 500 });

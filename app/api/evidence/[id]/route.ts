@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { database, ensureSchema, sessionIdForReportAccess } from '../../../../lib/database';
+import { database, ensureSchema, scanIsEntitled, sessionIdForReportAccess } from '../../../../lib/database';
 import { sessionFor } from '../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const accessSessionId = await sessionIdForReportAccess(evidence.scan_id, accessToken);
       if (accessSessionId !== evidence.session_id) return session.attach(NextResponse.json({ error: 'Evidence not found.' }, { status: 404 }));
     }
+    // Dismiss/restore is a paid-report feature.
+    if (!(await scanIsEntitled(evidence.scan_id))) return session.attach(NextResponse.json({ error: 'Unlock the full report before changing evidence.' }, { status: 403 }));
     const result = await database().prepare('UPDATE evidence SET dismissed = ? WHERE id = ? AND session_id = ?')
       .bind(body.dismissed ? 1 : 0, id, evidence.session_id).run();
     if (!result.meta.changes) return session.attach(NextResponse.json({ error: 'Evidence not found.' }, { status: 404 }));
