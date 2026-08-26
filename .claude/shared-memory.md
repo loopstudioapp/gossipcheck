@@ -32,7 +32,9 @@ to verify, never proof.
   3. Views: `onboarding → searching → paywall → report`; a locked scan at `/report` falls back
      to the paywall view.
   4. **Paywall** (TeaChecker-style clean checkout page, `pw-*` classes in `app/globals.css`;
-     white/sans/lime #99ff66, no neobrutalist borders/shadows/serif): top bar (brand + black
+     white/sans/lime #99ff66, no neobrutalist borders/shadows/serif; `body:has(.pw-page)`
+     forces the document canvas white so the cream body background never bleeds in): top bar
+     (brand + black
      "Get the report" pill) → "Results for {name}." → green **Posts found** box (big number +
      segmented green→red bar; dims to neutral gray at 0 mentions) → horizontal **blurred locked
      cards** (tag chip + black Locked

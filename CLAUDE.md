@@ -34,7 +34,8 @@ matches are treated as leads to verify — never proof.
 3. Views progress: `onboarding → searching → paywall → report`. A locked scan opened at
    `/report` falls back to the paywall view.
 4. **Paywall** (TeaChecker-style clean checkout page: `pw-*` classes, white/sans/lime, no
-   neobrutalist borders or serif): results header → green "Posts found" box (number +
+   neobrutalist borders or serif; `body:has(.pw-page)` keeps the document canvas white):
+   results header → green "Posts found" box (number +
    segmented green→red bar, dimmed to neutral at 0 mentions) → horizontal blurred locked cards
    (from server-redacted stubs) →
    black "50% discount expires in MM:SS" countdown (decorative session timer — no Stripe promo

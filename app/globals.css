@@ -782,8 +782,11 @@ footer div { display: flex; gap: 20px; }
 .story-grid p { margin: 0; color: #4c534a; font-size: 10.5px; line-height: 1.5; }
 
 /* Paywall — clean white/lime checkout page */
-.pw-page { min-height: 100vh; background: white; color: #17202a; }
-.pw-page h1, .pw-page h2 { font-family: var(--font-geist-sans), Arial, sans-serif; }
+/* The document canvas turns white whenever the paywall is mounted so the
+   cream body background can never bleed in (overscroll, unpainted edges). */
+body:has(.pw-page) { background: #ffffff; }
+.pw-page { min-height: 100vh; background: white; color: #17202a; font-family: var(--font-geist-sans), Arial, sans-serif; }
+.pw-page h1, .pw-page h2, .pw-page h3 { font-family: var(--font-geist-sans), Arial, sans-serif; }
 .pw-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; background: rgba(255,255,255,.94); border-bottom: 1px solid #eef0ec; backdrop-filter: blur(8px); }
 .pw-topbar .funnel-brand { font-size: 17px; }
 .pw-top-cta { padding: 10px 17px; border-radius: 999px; background: #111a20; color: white; font-size: 13px; font-weight: 750; }
