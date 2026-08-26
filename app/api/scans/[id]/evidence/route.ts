@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { database, evidenceBucket, getScans, sessionIdForReportAccess } from '../../../../../lib/database';
+import { database, evidenceBucket, entitlementIsActive, getScans, redactScan, sessionIdForReportAccess } from '../../../../../lib/database';
 import { sessionFor } from '../../../../../lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
     }
     if (!ownedScan) return session.attach(NextResponse.json({ error: 'Scan not found.' }, { status: 404 }));
+    if (!entitlementIsActive(ownedScan)) return session.attach(NextResponse.json({ error: 'Unlock the full report before adding evidence.' }, { status: 403 }));
 
     const data = await request.formData();
     const title = text(data, 'title', 160);
@@ -65,7 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const [scan] = await getScans(effectiveSessionId, scanId);
-    return session.attach(NextResponse.json({ scan }, { status: 201 }));
+    return session.attach(NextResponse.json({ scan: scan && redactScan(scan) }, { status: 201 }));
   } catch (error) {
     console.error('Could not save evidence', error);
     return NextResponse.json({ error: 'The Tea evidence could not be saved.' }, { status: 500 });

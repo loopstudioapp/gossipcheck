@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { CreateScanRequest } from '../../../../../lib/backend-types';
-import { database, ensureSchema, evidenceBucket, getScans } from '../../../../../lib/database';
+import { database, ensureSchema, evidenceBucket, getScans, redactScan } from '../../../../../lib/database';
 import { runProviders } from '../../../../../lib/providers';
 import { sessionFor } from '../../../../../lib/session';
 
@@ -29,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!row) return session.attach(NextResponse.json({ error: 'Scan not found.' }, { status: 404 }));
     if (row.status === 'complete') {
       const [scan] = await getScans(session.id, scanId);
-      return session.attach(NextResponse.json({ scan, cached: true }));
+      return session.attach(NextResponse.json({ scan: scan && redactScan(scan), cached: true }));
     }
     if (row.status === 'running') return session.attach(NextResponse.json({ error: 'This scan is already running.' }, { status: 409 }));
 
@@ -70,7 +70,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         .bind(message, new Date().toISOString(), scanId, session.id).run();
     }
     const [scan] = await getScans(session.id, scanId);
-    return session.attach(NextResponse.json({ scan }));
+    // The run response reaches the client before payment; withhold evidence content.
+    return session.attach(NextResponse.json({ scan: scan && redactScan(scan) }));
   } catch (error) {
     console.error('Could not run scan', error);
     return session.attach(NextResponse.json({ error: 'The scan could not be run.' }, { status: 500 }));

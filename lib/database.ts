@@ -12,6 +12,11 @@ type GossipEnv = {
   TEA_AUTHORIZED_TOKEN?: string;
   FACE_CHECK_API_TOKEN?: string;
   FACE_CHECK_TESTING_MODE?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_PRICE_WEEKLY?: string;
+  STRIPE_PRICE_MONTHLY?: string;
 };
 
 export const runtimeEnv = new Proxy({} as GossipEnv, {
@@ -22,6 +27,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, first_name TEXT NOT NULL, age INTEGER NOT NULL, city TEXT NOT NULL, usernames_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, face_search_consent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
+CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, scan_id TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS source_runs (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, source TEXT NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'manual_import', provider TEXT NOT NULL DEFAULT 'GossipCheck', external_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, source_url TEXT, confidence INTEGER NOT NULL DEFAULT 0, provider_score INTEGER, reasons_json TEXT NOT NULL DEFAULT '[]', subject_age INTEGER, subject_location TEXT, comment_count INTEGER NOT NULL DEFAULT 0, red_flags INTEGER NOT NULL DEFAULT 0, green_flags INTEGER NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL DEFAULT '{}', captured_at TEXT NOT NULL, object_key TEXT, mime_type TEXT, dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS evidence_comments (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE, external_id TEXT, author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, posted_at TEXT, reactions INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -32,6 +38,7 @@ CREATE INDEX IF NOT EXISTS source_runs_scan_idx ON source_runs(scan_id);
 CREATE INDEX IF NOT EXISTS source_runs_queue_idx ON source_runs(source, status, scan_id) WHERE status = 'queued';
 CREATE INDEX IF NOT EXISTS evidence_scan_idx ON evidence(scan_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS scan_photos_session_idx ON scan_photos(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS scans_subscription_idx ON scans(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL;
 `;
 
 let schemaReady: Promise<void> | undefined;
@@ -177,6 +184,10 @@ export async function ensureSchema() {
     await db.batch(statements.map((statement) => db.prepare(statement)));
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS access_token_hash TEXT').run();
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS face_search_consent INTEGER NOT NULL DEFAULT 0').run();
+    await db.prepare("ALTER TABLE scans ADD COLUMN IF NOT EXISTS entitlement_status TEXT NOT NULL DEFAULT 'locked'").run();
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS entitlement_plan TEXT').run();
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT').run();
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT').run();
     await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'manual_import'").run();
     await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'GossipCheck'").run();
     await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS external_id TEXT').run();
@@ -240,6 +251,8 @@ type ScanRow = {
   city: string;
   usernames_json: string;
   has_profile_photo: number;
+  entitlement_status: ScanRecord['entitlement']['status'];
+  entitlement_plan: ScanRecord['entitlement']['plan'];
 };
 
 type SourceRow = {
@@ -350,6 +363,10 @@ export async function hydrateScans(rows: ScanRow[], sessionId: string): Promise<
       note: source.note,
       matches: Number(source.matches),
     })),
+    entitlement: {
+      status: row.entitlement_status || 'locked',
+      plan: row.entitlement_plan || null,
+    },
     evidence: evidence.filter((item) => item.scan_id === row.id).map((item): EvidenceRecord => ({
       id: item.id,
       source: item.source,
@@ -386,6 +403,7 @@ export async function getScans(sessionId: string, scanId?: string) {
   await ensureSchema();
   const query = `
     SELECT s.id, s.status, s.created_at, s.completed_at, s.error,
+      s.entitlement_status, s.entitlement_plan,
       p.first_name, p.age, p.city, p.usernames_json,
       EXISTS(SELECT 1 FROM scan_photos sp WHERE sp.scan_id = s.id AND sp.session_id = s.session_id) AS has_profile_photo
     FROM scans s JOIN profiles p ON p.id = s.profile_id
@@ -395,4 +413,85 @@ export async function getScans(sessionId: string, scanId?: string) {
   const statement = database().prepare(query).bind(...(scanId ? [sessionId, scanId] : [sessionId]));
   const rows = (await statement.all<ScanRow>()).results;
   return hydrateScans(rows, sessionId);
+}
+
+export function entitlementIsActive(scan: ScanRecord) {
+  return scan.entitlement?.status === 'active';
+}
+
+export async function scanIsEntitled(scanId: string) {
+  await ensureSchema();
+  const row = await database().prepare("SELECT 1 AS entitled FROM scans WHERE id = ? AND entitlement_status = 'active'")
+    .bind(scanId).first<{ entitled: number }>();
+  return Boolean(row?.entitled);
+}
+
+/** Withhold evidence content for scans that have not been paid for; keep ids/counts so the paywall can render tiles. */
+export function redactScan(scan: ScanRecord): ScanRecord {
+  if (entitlementIsActive(scan)) return scan;
+  return {
+    ...scan,
+    redacted: true,
+    evidence: scan.evidence.map((item) => ({
+      id: item.id,
+      source: item.source,
+      kind: item.kind,
+      provider: '',
+      externalId: null,
+      title: '',
+      excerpt: '',
+      sourceUrl: null,
+      confidence: item.confidence,
+      reasons: [],
+      capturedAt: item.capturedAt,
+      hasImage: false,
+      imageUrl: null,
+      dismissed: item.dismissed,
+      subjectAge: null,
+      subjectLocation: null,
+      commentCount: 0,
+      redFlags: 0,
+      greenFlags: 0,
+      providerScore: null,
+      comments: [],
+    })),
+  };
+}
+
+export type EntitlementGrant = {
+  plan: ScanRecord['entitlement']['plan'];
+  customerId?: string | null;
+  subscriptionId?: string | null;
+};
+
+export async function grantScanEntitlement(scanId: string, grant: EntitlementGrant) {
+  await ensureSchema();
+  const result = await database().prepare(`
+    UPDATE scans SET entitlement_status = 'active', entitlement_plan = ?, stripe_customer_id = COALESCE(?, stripe_customer_id), stripe_subscription_id = COALESCE(?, stripe_subscription_id)
+    WHERE id = ?
+  `).bind(grant.plan, grant.customerId ?? null, grant.subscriptionId ?? null, scanId).run();
+  return Boolean(result.meta.changes);
+}
+
+export async function expireEntitlementForSubscription(subscriptionId: string) {
+  await ensureSchema();
+  const result = await database().prepare(`
+    UPDATE scans SET entitlement_status = 'expired'
+    WHERE stripe_subscription_id = ? AND entitlement_status = 'active'
+  `).bind(subscriptionId).run();
+  return Boolean(result.meta.changes);
+}
+
+/** Records a Stripe event id exactly once; returns false when the event was already processed. */
+export async function claimStripeEvent(id: string, type: string, scanId: string | null) {
+  await ensureSchema();
+  const result = await database().prepare('INSERT INTO stripe_events (id, type, scan_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING')
+    .bind(id, type, scanId, new Date().toISOString()).run();
+  return Boolean(result.meta.changes);
+}
+
+/** Frees a claimed event so a failed handler does not swallow Stripe's retry. */
+export async function releaseStripeEvent(id: string) {
+  await ensureSchema();
+  await database().prepare('DELETE FROM stripe_events WHERE id = ?').bind(id).run();
 }
