@@ -133,7 +133,7 @@ h1, h2 { font-family: Georgia, 'Times New Roman', serif; letter-spacing: -.055em
 .faq-section { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 50px 0 95px; }
 .faq-kicker { display: flex; align-items: center; gap: 24px; color: #277b43; font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 800; letter-spacing: .18em; }
 .faq-kicker i { display: block; height: 2px; flex: 1; background: var(--ink); }
-.faq-section > h2 { margin: 50px 0 58px; font-size: clamp(56px, 8vw, 104px); line-height: .9; font-weight: 600; }
+.faq-section > h2 { margin: 50px 0 58px; font-size: clamp(44px, 6vw, 76px); line-height: .94; font-weight: 600; }
 .faq-section > h2 em { background: linear-gradient(90deg, #25843d, #71bd53 42%, #e35e71); background-clip: text; -webkit-background-clip: text; color: transparent; font-weight: inherit; }
 .faq-list { display: grid; gap: 18px; }
 .faq-list details { border: 2px solid var(--ink); border-radius: 22px; background: var(--light); box-shadow: 5px 7px 0 var(--ink); overflow: hidden; }
