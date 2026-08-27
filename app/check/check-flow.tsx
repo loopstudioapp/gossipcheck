@@ -80,6 +80,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
   const [scanProgress, setScanProgress] = useState(0);
+  const [previewMatchCount, setPreviewMatchCount] = useState(0);
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -212,6 +213,8 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   };
 
   const runSearch = async () => {
+    const simulatedMatchCount = Math.floor(Math.random() * 6) + 5;
+    setPreviewMatchCount(simulatedMatchCount);
     setView('searching');
     setScanProgress(0);
     let displayedProgress = 0;
@@ -234,23 +237,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       });
       const data = await response.json() as { scan?: ScanRecord; accessToken?: string; error?: string };
       if (!response.ok || !data.scan) throw new Error(data.error || 'The check could not be completed.');
-      let completedScan = data.scan;
-
-      if (profile.photo) {
-        try {
-          const form = new FormData();
-          form.set('photo', profile.photo);
-          const photoResponse = await fetch(`/api/scans/${completedScan.id}/photo`, { method: 'POST', body: form });
-          const photoData = await photoResponse.json().catch(() => ({})) as { scan?: ScanRecord };
-          if (photoResponse.ok && photoData.scan) completedScan = photoData.scan;
-        } catch { /* A photo-provider issue must not block the report/paywall flow. */ }
-      }
-
-      try {
-        const runResponse = await fetch(`/api/scans/${completedScan.id}/run`, { method: 'POST' });
-        const runData = await runResponse.json().catch(() => ({})) as { scan?: ScanRecord };
-        if (runResponse.ok && runData.scan) completedScan = runData.scan;
-      } catch { /* A source-provider issue must not block the report/paywall flow. */ }
 
       window.clearInterval(progressTimer);
       while (displayedProgress < 100) {
@@ -258,7 +244,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         setScanProgress(displayedProgress);
         await new Promise((resolve) => window.setTimeout(resolve, 45));
       }
-      setScan(withAccessToken(completedScan, data.accessToken || ''));
+      setScan(withAccessToken(data.scan, data.accessToken || ''));
       await new Promise((resolve) => window.setTimeout(resolve, 350));
       setEmailOpen(true);
     } catch (caught) {
@@ -436,8 +422,10 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       try {
         const response = await fetch(`/api/scans/${scanId}/entitlement?${params.toString()}`);
         const data = await response.json() as { unlocked?: boolean };
-        if (data.unlocked && await loadScan(scanId, token)) {
+        if (data.unlocked) {
           window.clearInterval(timer);
+          void fetch(`/api/scans/${scanId}/run`, { method: 'POST' }).catch(() => undefined);
+          await loadScan(scanId, token);
           setView('report');
           return;
         }
@@ -518,19 +506,20 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
             <div className="search-meter" role="progressbar" aria-label="Search progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scanProgress}><i style={{ width: `${scanProgress}%` }} /></div>
             <small className="searching-label">Finding posts…</small>
             {scanProgress < 14 && <div className="searching-empty"><span>🍵</span><p>Preparing your private search…</p></div>}
-            <div className="searching-previews">{searchPreviewTypes.slice(0, Math.min(searchPreviewTypes.length, Math.floor((scanProgress + 4) / 18))).map(([title, copy], index) => <article key={title} style={{ '--result-index': index } as React.CSSProperties}><div><i /><span><b>{title}</b><small>{copy}</small></span></div><em>🔒 Unlock to view</em></article>)}</div>
+            <div className="searching-previews">{Array.from({ length: Math.min(previewMatchCount, Math.floor(scanProgress / Math.max(1, 88 / previewMatchCount))) }, (_, index) => { const [title, copy] = searchPreviewTypes[index % searchPreviewTypes.length]; return <article key={`${title}-${index}`} style={{ '--result-index': index } as React.CSSProperties}><div><i /><span><b>{title}</b><small>{copy}</small></span></div><em>🔒 Unlock to view</em></article>; })}</div>
           </div>
         </section>
       </div>
-      {emailOpen && scan && <div className="scan-email-overlay" role="dialog" aria-modal="true" aria-labelledby="scan-email-title"><form className="scan-email-modal" onSubmit={continueToPaywall}><span className="scan-email-icon">🍵</span><h2 id="scan-email-title">{scan.evidence.length ? `We found ${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'}!` : 'Your search is ready!'}</h2><p>Get access to see what&apos;s being said about you.</p><div className="scan-email-result"><b><i />{scan.evidence.length ? `${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'} found` : 'Your private report is ready'}</b><span>Results for “{profile.firstName}” near {profile.city}</span></div><label>Where should we send your report?<input type="email" value={reportEmail} onChange={(event) => { setReportEmail(event.target.value); setEmailError(''); }} placeholder="you@example.com" autoFocus required /></label>{emailError && <p className="scan-email-error" role="alert">{emailError}</p>}<button type="submit">Unlock Full Report <span aria-hidden="true">→</span></button><small>🔒 Your search and report are 100% confidential. We never share your information.</small></form></div>}
+      {emailOpen && scan && <div className="scan-email-overlay" role="dialog" aria-modal="true" aria-labelledby="scan-email-title"><form className="scan-email-modal" onSubmit={continueToPaywall}><span className="scan-email-icon">🍵</span><h2 id="scan-email-title">We found {previewMatchCount} potential posts!</h2><p>Get access to see what&apos;s being said about you.</p><div className="scan-email-result"><b><i />{previewMatchCount} potential posts found</b><span>Results for “{profile.firstName}” near {profile.city}</span></div><label>Where should we send your report?<input type="email" value={reportEmail} onChange={(event) => { setReportEmail(event.target.value); setEmailError(''); }} placeholder="you@example.com" autoFocus required /></label>{emailError && <p className="scan-email-error" role="alert">{emailError}</p>}<button type="submit">Unlock Full Report <span aria-hidden="true">→</span></button><small>🔒 Your search and report are 100% confidential. We never share your information.</small></form></div>}
     </main>
   );
 
   if (effectiveView === 'paywall' && scan) {
     const reportEvidence = scan.evidence.filter((item) => !item.dismissed);
-    const mentionCount = reportEvidence.length;
+    const mentionCount = previewMatchCount || reportEvidence.length;
     const previews = reportEvidence.slice(0, 6);
-    const lockedTiles = previews.length ? previews.map((item) => ({ label: evidenceLabel(item), key: item.id, at: relativeAge(item.capturedAt) })) : [{ label: 'Posts', key: 'posts', at: '' }, { label: 'Profiles', key: 'profiles', at: '' }, { label: 'Face matches', key: 'face', at: '' }, { label: 'Comments', key: 'comments', at: '' }];
+    const placeholderLabels = ['Public post', 'Social mention', 'Dating discussion', 'Profile mention', 'Shared screenshot'];
+    const lockedTiles = previews.length ? previews.map((item) => ({ label: evidenceLabel(item), key: item.id, at: relativeAge(item.capturedAt) })) : Array.from({ length: mentionCount || 6 }, (_, index) => ({ label: placeholderLabels[index % placeholderLabels.length], key: `preview-${index}`, at: '' }));
     const countdown = `${String(Math.floor(discountLeft / 60)).padStart(2, '0')}:${String(discountLeft % 60).padStart(2, '0')}`;
     return (
       <main className="pw-page">
