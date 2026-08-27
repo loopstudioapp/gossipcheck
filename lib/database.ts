@@ -27,7 +27,7 @@ export const runtimeEnv = new Proxy({} as GossipEnv, {
 const schema = `
 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, first_name TEXT NOT NULL, age INTEGER NOT NULL, city TEXT NOT NULL, usernames_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, face_search_consent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
+CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE, access_token_hash TEXT, report_email TEXT, face_search_consent INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, scan_id TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS source_runs (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, source TEXT NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, started_at TEXT, completed_at TEXT);
 CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, source TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'manual_import', provider TEXT NOT NULL DEFAULT 'GossipCheck', external_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, source_url TEXT, confidence INTEGER NOT NULL DEFAULT 0, provider_score INTEGER, reasons_json TEXT NOT NULL DEFAULT '[]', subject_age INTEGER, subject_location TEXT, comment_count INTEGER NOT NULL DEFAULT 0, red_flags INTEGER NOT NULL DEFAULT 0, green_flags INTEGER NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL DEFAULT '{}', captured_at TEXT NOT NULL, object_key TEXT, mime_type TEXT, dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
@@ -183,6 +183,7 @@ export async function ensureSchema() {
     const statements = schema.split(';').map((statement) => statement.trim()).filter(Boolean);
     await db.batch(statements.map((statement) => db.prepare(statement)));
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS access_token_hash TEXT').run();
+    await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS report_email TEXT').run();
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS face_search_consent INTEGER NOT NULL DEFAULT 0').run();
     await db.prepare("ALTER TABLE scans ADD COLUMN IF NOT EXISTS entitlement_status TEXT NOT NULL DEFAULT 'locked'").run();
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS entitlement_plan TEXT').run();

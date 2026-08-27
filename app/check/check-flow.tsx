@@ -260,17 +260,31 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     }
   };
 
-  const continueToPaywall = (event: FormEvent<HTMLFormElement>) => {
+  const continueToPaywall = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const email = reportEmail.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setEmailError('Enter a valid email address.');
       return;
     }
-    setReportEmail(email);
+    if (!scan) return;
     setEmailError('');
-    setEmailOpen(false);
-    setView('paywall');
+    try {
+      const accessToken = new URL(window.location.href).searchParams.get('access_token') || '';
+      const query = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : '';
+      const response = await fetch(`/api/scans/${scan.id}${query}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json() as { saved?: boolean; error?: string };
+      if (!response.ok || !data.saved) throw new Error(data.error || 'Your email could not be saved.');
+      setReportEmail(email);
+      setEmailOpen(false);
+      setView('paywall');
+    } catch (caught) {
+      setEmailError(caught instanceof Error ? caught.message : 'Your email could not be saved. Please try again.');
+    }
   };
 
   const importEvidence = async (event: FormEvent<HTMLFormElement>) => {

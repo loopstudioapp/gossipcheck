@@ -55,7 +55,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
 
     await ensureSchema();
-    await database().prepare('UPDATE scans SET entitlement_plan = COALESCE(entitlement_plan, ?) WHERE id = ?').bind(plan, scanId).run();
+    await database().prepare('UPDATE scans SET entitlement_plan = COALESCE(entitlement_plan, ?), report_email = COALESCE(NULLIF(?, \'\'), report_email) WHERE id = ?')
+      .bind(plan, email, scanId).run();
     return session.attach(NextResponse.json({ clientSecret: checkout.client_secret, plan }, { status: 201 }));
   } catch (error) {
     console.error('Could not start checkout', error);
