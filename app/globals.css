@@ -857,18 +857,24 @@ body:has(.pw-page) { background: radial-gradient(circle at 8% 20%, rgba(174,255,
 .pw-plans b { font-size: 21px; letter-spacing: -.02em; }
 .pw-plans b small { margin-left: 2px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .pw-plans > button > small:last-child { color: var(--muted); font-size: 10.5px; }
-.pw-payment-card { display: grid; gap: 16px; padding: 20px; border: 2px solid var(--ink); border-radius: 17px; background: var(--light); box-shadow: 5px 5px 0 var(--ink); }
-.pw-payment-heading { display: flex; align-items: center; gap: 12px; }
-.pw-payment-heading > span { display: grid; width: 38px; height: 38px; place-items: center; border: 2px solid var(--ink); border-radius: 10px; background: #e7ecff; color: var(--blue); font-weight: 900; }
-.pw-payment-heading b { display: block; font-size: 15px; }
-.pw-payment-heading small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
-.pw-stripe-embed { min-height: 430px; overflow: hidden; border: 1px solid #e2e5df; border-radius: 12px; background: white; }
+.pw-payment-card { display: grid; gap: 18px; padding: 0; }
+.pw-stripe-elements { display: grid; gap: 16px; }
+.pw-payment-loading { min-height: 54px; display: grid; place-items: center; color: var(--muted); font-size: 12px; font-weight: 750; }
+.pw-express-checkout { min-height: 54px; }
+.pw-express-checkout.is-unavailable { display: none; }
+.pw-card-toggle { width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 17px 18px; border: 1px solid #d8dcd5; border-radius: 12px; background: white; color: var(--ink); box-shadow: 0 2px 6px rgba(17,26,32,.07); text-align: left; cursor: pointer; }
+.pw-card-toggle b { font-size: 15px; }
+.pw-card-icon { color: #4c555c; font-size: 17px; line-height: 1; transform: rotate(90deg); }
+.pw-card-chevron { color: var(--muted); font-size: 20px; line-height: 1; transition: transform .18s ease; }
+.pw-card-chevron.is-open { transform: rotate(180deg); }
+.pw-card-form { display: grid; gap: 16px; padding: 17px; border: 1px solid #d8dcd5; border-radius: 12px; background: white; box-shadow: 0 2px 6px rgba(17,26,32,.07); }
 .pw-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .pw-methods i { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 13px 20px; border: 2px solid var(--ink); border-radius: 11px; font-size: 13px; font-weight: 850; font-style: normal; }
 .pw-methods .pw-apay { background: var(--ink); color: white; }
 .pw-methods .pw-link { background: var(--lime); color: var(--ink); }
 .pw-divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 11.5px; font-weight: 700; }
 .pw-divider::before, .pw-divider::after { content: ''; flex: 1; height: 2px; background: var(--ink); }
+.pw-divider span { white-space: nowrap; }
 .pw-cardbrands { display: flex; justify-content: center; gap: 8px; }
 .pw-cardbrands i { padding: 5px 10px; border: 1.5px solid var(--ink); border-radius: 6px; background: white; color: #47515a; font-size: 9px; font-weight: 900; font-style: italic; }
 .pw-pay { width: 100%; padding: 17px 22px; border: 2px solid var(--ink); border-radius: 999px; background: var(--ink); box-shadow: 5px 5px 0 var(--lime); color: white; font-size: 16px; font-weight: 900; cursor: pointer; }
@@ -1121,7 +1127,7 @@ body:has(.pw-page) { background: radial-gradient(circle at 8% 20%, rgba(174,255,
   .pw-price-tag { margin-left: 0; justify-items: start; text-align: left; }
   .pw-cards { grid-auto-columns: 78%; }
   .pw-unlock-title { font-size: 25px; }
-  .pw-offer-content, .pw-payment-card { padding: 16px; }
+  .pw-offer-content { padding: 16px; }
   .pw-countdown { font-size: 12px; }
   .pw-plans { grid-template-columns: 1fr; }
   .pw-stats { gap: 6px; }
