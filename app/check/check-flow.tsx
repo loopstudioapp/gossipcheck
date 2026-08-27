@@ -562,38 +562,45 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           </div>
 
           <h2 className="pw-unlock-title"><span aria-hidden="true">🔓</span> Unlock your full report</h2>
-          {discountLeft > 0 && <div className="pw-countdown"><span aria-hidden="true">⏱</span> 50% discount expires in <b>{countdown}</b></div>}
-
           <section className="pw-offer" id="pw-offer">
-            <div className="pw-price-row">
-              <div className="pw-offer-head">
-                <b>Full report</b>
-                <ul>
-                  {['Full post content with source and date', 'Every comment and reaction count', 'Alerts when new mentions appear'].map((feature) => <li key={feature}><span className="pw-check" aria-hidden="true">✓</span>{feature}</li>)}
-                </ul>
+            {discountLeft > 0 && <div className="pw-countdown"><span aria-hidden="true">⏱</span> 50% discount expires in <b>{countdown}</b></div>}
+            <div className="pw-offer-content">
+              <div className="pw-price-row">
+                <div className="pw-offer-head">
+                  <b>Full GossipCheck report</b>
+                  <ul>
+                    {['Full post content with source and date', 'Every comment and reaction count', 'Alerts when new mentions appear'].map((feature) => <li key={feature}><span className="pw-check" aria-hidden="true">✓</span>{feature}</li>)}
+                  </ul>
+                </div>
+                <div className="pw-price-tag"><b>{plans[plan].perDay.replace('/day', '')}</b><span>per day</span><small>billed {plans[plan].price}{plans[plan].cycle}</small></div>
               </div>
-              <div className="pw-price-tag"><b>{plans[plan].perDay.replace('/day', '')}</b><span>per day</span><small>billed {plans[plan].price}{plans[plan].cycle}</small></div>
+              <div className="pw-plans">
+                {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
+                  <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
+                    <span className="pw-plan-tag">{plans[key].tag}</span>
+                    <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
+                    <small>{plans[key].perDay} · cancel anytime</small>
+                  </button>
+                ))}
+              </div>
+              {checkoutError && <p className="pw-error" role="alert">{checkoutError}</p>}
             </div>
-            <div className="pw-plans">
-              {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
-                <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
-                  <span className="pw-plan-tag">{plans[key].tag}</span>
-                  <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
-                  <small>{plans[key].perDay} · cancel anytime</small>
-                </button>
-              ))}
-            </div>
-            {checkoutError && <p className="pw-error" role="alert">{checkoutError}</p>}
           </section>
 
-          <div className="pw-methods"><i className="pw-apay">Apple Pay</i><i className="pw-link">Link <span aria-hidden="true">→</span></i></div>
-          <div className="pw-divider"><span>Or pay with card</span></div>
-          <div className="pw-cardbrands" aria-label="Accepted cards"><i>VISA</i><i>Mastercard</i><i>Amex</i><i>Discover</i></div>
-          <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Pay & Get Report'} <span aria-hidden="true">→</span></button>
-          <p className="pw-secure">🔒 Guaranteed safe &amp; secure checkout by Stripe.</p>
-          <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
+          <section className="pw-payment-card">
+            <div className="pw-payment-heading"><span aria-hidden="true">▣</span><div><b>Secure checkout</b><small>Complete payment securely with Stripe.</small></div></div>
+            <div className="pw-methods"><i className="pw-apay">Apple Pay</i><i className="pw-link">Link <span aria-hidden="true">→</span></i></div>
+            <div className="pw-divider"><span>Or pay with card</span></div>
+            <div className="pw-cardbrands" aria-label="Accepted cards"><i>VISA</i><i>Mastercard</i><i>Amex</i><i>Discover</i></div>
+            <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Pay & Get Report'} <span aria-hidden="true">→</span></button>
+            <p className="pw-secure">🔒 Guaranteed safe &amp; secure checkout by Stripe.</p>
+            <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
+          </section>
 
-          <div className="pw-stats"><span>3 sources checked per scan</span><span>Private by default</span><span>Self-search only · 18+</span></div>
+          <section className="pw-trust">
+            <h2>Built for careful review</h2>
+            <div className="pw-stats"><span><b>3</b><small>Sources checked</small></span><span><b>100%</b><small>Private by default</small></span><span><b>18+</b><small>Self-search only</small></span></div>
+          </section>
 
           <h2 className="pw-section-title">What people are saying</h2>
           <div className="pw-quotes">
