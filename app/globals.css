@@ -889,6 +889,9 @@ body:has(.pw-page) { background: #ffffff; }
 .searching-page { background: var(--paper); }
 .searching-top { display: flex; justify-content: center; padding: 6px 0 24px; border-bottom: 2px solid var(--ink); }
 .searching-page > .searching-panel { width: min(980px, 100%); margin: 26px auto 0; text-align: left; }
+.search-results-shell { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.search-results-main { padding-block: 24px 32px; justify-content: flex-start; }
+.search-results-main .searching-panel { width: 100%; margin: 0; text-align: left; }
 .searching-summary { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px; border: 2px solid var(--ink); border-radius: 18px 18px 0 0; background: #fff2c9; }
 .searching-summary h1 { margin: 0 0 4px; font-family: var(--font-geist-sans), Arial, sans-serif; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.04em; }
 .searching-summary p { margin: 0; }
@@ -900,10 +903,13 @@ body:has(.pw-page) { background: #ffffff; }
 .search-orbit span { border: 2px solid var(--ink); background: var(--lime); box-shadow: 7px 8px 0 var(--ink); color: var(--blue); }
 .searching-page h1 { color: var(--ink); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(48px, 6vw, 70px); letter-spacing: -.055em; }
 .search-meter { height: 14px; margin: 10px 0 38px; border: 2px solid var(--ink); background: var(--light); }
-.search-meter i { background: linear-gradient(90deg, #7fc26a, var(--lime)); }
+.search-meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7fc26a, var(--lime)); transition: width .12s linear; }
 .searching-label { color: #8a8b84; font-size: 14px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.searching-empty { min-height: 180px; display: grid; place-items: center; align-content: center; gap: 12px; color: var(--muted); text-align: center; }
+.searching-empty span { display: grid; width: 66px; height: 66px; place-items: center; border: 2px solid var(--ink); border-radius: 17px; background: linear-gradient(135deg, #8fe27a, #ffe072); box-shadow: 5px 5px 0 var(--ink); font-size: 28px; }
+.searching-empty p { margin: 0; }
 .searching-previews { display: grid; gap: 18px; margin-top: 18px; }
-.searching-previews article { position: relative; min-height: 128px; display: grid; place-items: center; overflow: hidden; border: 2px solid var(--ink); border-radius: 22px; background: var(--light); }
+.searching-previews article { position: relative; min-height: 128px; display: grid; place-items: center; overflow: hidden; border: 2px solid var(--ink); border-radius: 22px; background: var(--light); animation: search-result-in .38s ease both; animation-delay: calc(var(--result-index) * 35ms); }
 .searching-previews article > div { position: absolute; inset: 20px; display: flex; align-items: center; gap: 20px; filter: blur(8px); opacity: .62; }
 .searching-previews article > div > i { width: 86px; height: 86px; border-radius: 12px; background: #b8d7ee; }
 .searching-previews article > div span { display: grid; gap: 10px; }
@@ -924,6 +930,8 @@ body:has(.pw-page) { background: #ffffff; }
 .scan-email-modal > small { display: block; margin-top: 22px; color: var(--muted); line-height: 1.5; text-align: center; }
 .scan-email-error { margin-top: 8px !important; color: #b52b38 !important; font-size: 12px; }
 .search-facts span { padding: 7px 9px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.38); }
+
+@keyframes search-result-in { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: none; } }
 
 .report-route-state { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 18px; padding: 30px; background: var(--paper); color: var(--ink); text-align: center; }
 .report-route-state > .funnel-brand { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); }
@@ -1045,6 +1053,7 @@ body:has(.pw-page) { background: #ffffff; }
   .searching-page { padding: 12px; }
   .searching-top { padding-bottom: 14px; }
   .searching-page > .searching-panel { margin-top: 14px; }
+  .search-results-main { padding: 16px 15px 24px; }
   .searching-summary { align-items: flex-start; padding: 17px; }
   .searching-summary h1 { font-size: 29px; }
   .searching-summary > span { font-size: 12px; }

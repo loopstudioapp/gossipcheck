@@ -20,6 +20,13 @@ const experiences = [
   ['📱', 'The tone changed after a phone check'],
   ['🤷', 'Interested matches never responded'],
 ];
+const searchPreviewTypes = [
+  ['Public post', 'A possible name and location match'],
+  ['Social mention', 'A possible mention shared near your area'],
+  ['Dating discussion', 'A possible post related to dating'],
+  ['Profile mention', 'A possible username or profile match'],
+  ['Shared screenshot', 'A possible repost or saved discussion'],
+];
 
 const sourceStatusLabel = (status: string) => status === 'complete' ? 'Checked' : status === 'queued' || status === 'running' ? 'In review' : status === 'unconfigured' ? 'Needs setup' : status;
 const publicMatchTier = (item: EvidenceRecord) => {
@@ -72,7 +79,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [view, setView] = useState<AppView>(initialView);
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
-  const [scanStage, setScanStage] = useState(0);
+  const [scanProgress, setScanProgress] = useState(0);
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -206,10 +213,13 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
   const runSearch = async () => {
     setView('searching');
-    setScanStage(0);
-    const stageTimers = [650, 1300, 1950].map((delay, index) => window.setTimeout(() => setScanStage(index + 1), delay));
+    setScanProgress(0);
+    let displayedProgress = 0;
+    const progressTimer = window.setInterval(() => {
+      displayedProgress = Math.min(92, displayedProgress + 1);
+      setScanProgress(displayedProgress);
+    }, 70);
     try {
-      const started = Date.now();
       const response = await fetch('/api/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -242,17 +252,21 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         if (runResponse.ok && runData.scan) completedScan = runData.scan;
       } catch { /* A source-provider issue must not block the report/paywall flow. */ }
 
-      const remaining = Math.max(0, 2400 - (Date.now() - started));
-      await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      window.clearInterval(progressTimer);
+      while (displayedProgress < 100) {
+        displayedProgress = Math.min(100, displayedProgress + 2);
+        setScanProgress(displayedProgress);
+        await new Promise((resolve) => window.setTimeout(resolve, 45));
+      }
       setScan(withAccessToken(completedScan, data.accessToken || ''));
-      setScanStage(3);
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
       setEmailOpen(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The check could not be completed.');
       setView('onboarding');
       setStep(11);
     } finally {
-      stageTimers.forEach(window.clearTimeout);
+      window.clearInterval(progressTimer);
     }
   };
 
@@ -492,15 +506,22 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   );
 
   if (view === 'searching') return (
-    <main className="searching-page">
-      <header className="searching-top"><BrandLink /></header>
-      <section className="searching-panel">
-        <div className="searching-summary"><div><h1>Searching for {profile.firstName}</h1><p>Age {profile.age} · Near {profile.city}</p></div><span><i />{emailOpen ? 'Search complete' : 'Searching'}</span></div>
-        <div className="searching-progress"><strong>●●● {['Creating your private report…', 'Checking public sources…', 'Finding potential posts…', 'Search complete'][scanStage]}</strong><b>{[18, 42, 71, 100][scanStage]}%</b></div>
-        <div className="search-meter"><i style={{ width: `${[18, 42, 71, 100][scanStage]}%` }} /></div>
-        <small className="searching-label">Finding posts…</small>
-        <div className="searching-previews">{Array.from({ length: 5 }, (_, index) => <article key={index}><div><i /><span><b>Potential match</b><small>Public post near {profile.city}</small></span></div><em>🔒 Unlock to view</em></article>)}</div>
-      </section>
+    <main className="funnel-page search-results-page">
+      <div className="funnel-shell search-results-shell">
+        <header className="funnel-header"><button type="button" onClick={startOver} aria-label="Back to search form">←</button><BrandLink /><div><b>11</b><span>/{totalSteps}</span></div></header>
+        <div className="funnel-progress" aria-label="Onboarding complete"><i style={{ width: '100%' }} /></div>
+        <div className="funnel-status"><span>Search in progress</span><span>● Private self-search</span></div>
+        <section className="funnel-main search-results-main">
+          <div className="searching-panel">
+            <div className="searching-summary"><div><h1>Searching for {profile.firstName}</h1><p>Age {profile.age} · Near {profile.city}</p></div><span><i />{emailOpen ? 'Search complete' : 'Searching'}</span></div>
+            <div className="searching-progress"><strong>●●● {scanProgress < 25 ? 'Scanning public records…' : scanProgress < 50 ? 'Checking social mentions…' : scanProgress < 75 ? 'Analyzing dating app mentions…' : scanProgress < 100 ? 'Validating potential matches…' : 'Search complete'}</strong><b>{scanProgress}%</b></div>
+            <div className="search-meter" role="progressbar" aria-label="Search progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scanProgress}><i style={{ width: `${scanProgress}%` }} /></div>
+            <small className="searching-label">Finding posts…</small>
+            {scanProgress < 14 && <div className="searching-empty"><span>🍵</span><p>Preparing your private search…</p></div>}
+            <div className="searching-previews">{searchPreviewTypes.slice(0, Math.min(searchPreviewTypes.length, Math.floor((scanProgress + 4) / 18))).map(([title, copy], index) => <article key={title} style={{ '--result-index': index } as React.CSSProperties}><div><i /><span><b>{title}</b><small>{copy}</small></span></div><em>🔒 Unlock to view</em></article>)}</div>
+          </div>
+        </section>
+      </div>
       {emailOpen && scan && <div className="scan-email-overlay" role="dialog" aria-modal="true" aria-labelledby="scan-email-title"><form className="scan-email-modal" onSubmit={continueToPaywall}><span className="scan-email-icon">🍵</span><h2 id="scan-email-title">{scan.evidence.length ? `We found ${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'}!` : 'Your search is ready!'}</h2><p>Get access to see what&apos;s being said about you.</p><div className="scan-email-result"><b><i />{scan.evidence.length ? `${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'} found` : 'Your private report is ready'}</b><span>Results for “{profile.firstName}” near {profile.city}</span></div><label>Where should we send your report?<input type="email" value={reportEmail} onChange={(event) => { setReportEmail(event.target.value); setEmailError(''); }} placeholder="you@example.com" autoFocus required /></label>{emailError && <p className="scan-email-error" role="alert">{emailError}</p>}<button type="submit">Unlock Full Report <span aria-hidden="true">→</span></button><small>🔒 Your search and report are 100% confidential. We never share your information.</small></form></div>}
     </main>
   );
