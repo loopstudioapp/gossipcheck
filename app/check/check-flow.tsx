@@ -2,14 +2,13 @@
 
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
 
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
 
 const plans = {
-  weekly: { price: '$9.99', cycle: '/week', perDay: '$1.43/day', tag: '', disclaimer: 'Your subscription starts now and renews automatically at $9.99 every week until canceled. Cancel anytime.' },
-  monthly: { price: '$17.99', cycle: '/month', perDay: '$0.60/day', tag: 'BEST VALUE', disclaimer: 'Your subscription starts now and renews automatically at $17.99 every month until canceled. Cancel anytime.' },
+  monthly: { price: '$29.99', cycle: '/month', perDay: '$0.99/day', disclaimer: 'Your first month is $29.99 with the introductory discount. Your subscription then renews automatically at $59.99 per month until canceled. Cancel anytime.' },
 } as const;
 
 const totalSteps = 11;
@@ -81,6 +80,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [error, setError] = useState('');
   const [scanProgress, setScanProgress] = useState(0);
   const [previewMatchCount, setPreviewMatchCount] = useState(0);
+  const previewRailRef = useRef<HTMLDivElement>(null);
   const [scan, setScan] = useState<ScanRecord | null>(null);
   const [history, setHistory] = useState<ScanRecord[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -91,7 +91,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [refreshingProfiles, setRefreshingProfiles] = useState(false);
   const [postRefreshError, setPostRefreshError] = useState('');
   const [profileRefreshError, setProfileRefreshError] = useState('');
-  const [plan, setPlan] = useState<keyof typeof plans>('monthly');
+  const [plan] = useState<keyof typeof plans>('monthly');
   const [startingPlan, setStartingPlan] = useState<keyof typeof plans | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
   const [reportEmail, setReportEmail] = useState('');
@@ -457,6 +457,25 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     return () => window.clearInterval(timer);
   }, [pendingScanId]);
 
+  useEffect(() => {
+    if (view !== 'paywall') return;
+    const rail = previewRailRef.current;
+    if (!rail) return;
+    let frame = 0;
+    let previous = performance.now();
+    const move = (now: number) => {
+      const elapsed = Math.min(40, now - previous);
+      previous = now;
+      if (rail.scrollWidth > rail.clientWidth) {
+        rail.scrollLeft += elapsed * .035;
+        if (rail.scrollLeft >= rail.scrollWidth - rail.clientWidth - 1) rail.scrollLeft = 0;
+      }
+      frame = window.requestAnimationFrame(move);
+    };
+    frame = window.requestAnimationFrame(move);
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, previewMatchCount]);
+
   if (view === 'onboarding') return (
     <main className="funnel-page">
       <div className="funnel-shell">
@@ -540,7 +559,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           </section>
 
           <h2 className="pw-section-title">Potential posts found</h2>
-          <div className="pw-cards">
+          <div className="pw-cards" ref={previewRailRef}>
             {lockedTiles.map((tile) => (
               <article className="pw-post" key={tile.key}>
                 <div className="pw-post-top"><span className="pw-chip">{tile.label}</span>{tile.at && <small>{tile.at}</small>}</div>
@@ -563,32 +582,22 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
                 </div>
                 <div className="pw-price-tag"><b>{plans[plan].perDay.replace('/day', '')}</b><span>per day</span><small>billed {plans[plan].price}{plans[plan].cycle}</small></div>
               </div>
-              <div className="pw-plans">
-                {(Object.keys(plans) as (keyof typeof plans)[]).map((key) => (
-                  <button type="button" key={key} className={plan === key ? 'active' : ''} onClick={() => setPlan(key)}>
-                    <span className="pw-plan-tag">{plans[key].tag}</span>
-                    <b>{plans[key].price}<small>{plans[key].cycle}</small></b>
-                    <small>{plans[key].perDay} · cancel anytime</small>
-                  </button>
-                ))}
-              </div>
+              <div className="pw-single-plan"><span>50% INTRO PRICE</span><b>$29.99 <small>first month</small></b><p>Then $59.99/month · cancel anytime</p></div>
               {checkoutError && <p className="pw-error" role="alert">{checkoutError}</p>}
             </div>
           </section>
 
           <section className="pw-payment-card">
-            <div className="pw-payment-heading"><span aria-hidden="true">▣</span><div><b>Secure checkout</b><small>Complete payment securely with Stripe.</small></div></div>
-            <div className="pw-methods"><i className="pw-apay">Apple Pay</i><i className="pw-link">Link <span aria-hidden="true">→</span></i></div>
-            <div className="pw-divider"><span>Or pay with card</span></div>
-            <div className="pw-cardbrands" aria-label="Accepted cards"><i>VISA</i><i>Mastercard</i><i>Amex</i><i>Discover</i></div>
-            <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Pay & Get Report'} <span aria-hidden="true">→</span></button>
-            <p className="pw-secure">🔒 Guaranteed safe &amp; secure checkout by Stripe.</p>
+            <div className="pw-payment-heading"><span aria-hidden="true">S</span><div><b>Pay securely with Stripe</b><small>Stripe displays the real payment form and available payment methods.</small></div></div>
+            <div className="pw-stripe-summary"><span>Due today</span><b>$29.99</b><small>Then $59.99/month until canceled</small></div>
+            <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Continue to Stripe Checkout'} <span aria-hidden="true">→</span></button>
+            <p className="pw-secure">🔒 Payment details are collected by Stripe, not GossipCheck.</p>
             <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
           </section>
 
           <section className="pw-trust">
-            <h2>Built for careful review</h2>
-            <div className="pw-stats"><span><b>3</b><small>Sources checked</small></span><span><b>100%</b><small>Private by default</small></span><span><b>18+</b><small>Self-search only</small></span></div>
+            <h2>Trusted by 50,000+ guys</h2>
+            <div className="pw-stats"><span><b>94%</b><small>Accuracy Rate</small></span><span><b>50K+</b><small>Searches</small></span><span><b>4.8★</b><small>User Rating</small></span></div>
           </section>
 
           <h2 className="pw-section-title">What people are saying</h2>

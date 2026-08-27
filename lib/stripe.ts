@@ -12,7 +12,7 @@ export function stripe(): Stripe | null {
 }
 
 export function checkoutConfigured() {
-  return Boolean(runtimeEnv.STRIPE_SECRET_KEY && runtimeEnv.STRIPE_PRICE_WEEKLY && runtimeEnv.STRIPE_PRICE_MONTHLY);
+  return Boolean(runtimeEnv.STRIPE_SECRET_KEY && runtimeEnv.STRIPE_PRICE_MONTHLY && runtimeEnv.STRIPE_INTRO_COUPON_ID);
 }
 
 export function webhookConfigured() {

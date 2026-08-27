@@ -45,6 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const checkout = await stripe()!.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
+      discounts: [{ coupon: process.env.STRIPE_INTRO_COUPON_ID! }],
       client_reference_id: scanId,
       metadata: { scan_id: scanId, plan },
       subscription_data: { metadata: { scan_id: scanId, plan } },
