@@ -152,8 +152,7 @@ export default function EmbeddedPayment({ scanId, accessToken, email, onError }:
         },
       },
     },
-    defaultValues: email ? { email } : undefined,
-  }), [clientSecret, email]);
+  }), [clientSecret]);
 
   if (!stripePromise) return <p className="pw-error" role="alert">Stripe is not configured for this deployment yet.</p>;
 
