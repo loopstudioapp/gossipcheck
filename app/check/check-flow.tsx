@@ -585,7 +585,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
           <section className="pw-payment-card">
             <EmbeddedPayment scanId={scan.id} accessToken={typeof window === 'undefined' ? '' : new URL(window.location.href).searchParams.get('access_token') || ''} email={reportEmail} onError={setCheckoutError} />
-            <p className="pw-secure">Guaranteed <b>safe &amp; secure</b> checkout by Stripe</p>
+            <p className="pw-secure"><span aria-hidden="true">🔒</span><span>Guaranteed <b>safe &amp; secure</b> checkout by Stripe</span></p>
             <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
           </section>
 

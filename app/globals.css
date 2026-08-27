@@ -880,7 +880,8 @@ body:has(.pw-page) { background: radial-gradient(circle at 8% 20%, rgba(174,255,
 .pw-pay { width: 100%; padding: 17px 22px; border: 2px solid var(--ink); border-radius: 999px; background: var(--ink); box-shadow: 5px 5px 0 var(--lime); color: white; font-size: 16px; font-weight: 900; cursor: pointer; }
 .pw-pay:disabled { opacity: .7; cursor: default; }
 .pw-pay span { margin-left: 10px; color: var(--lime); }
-.pw-secure { margin: 0; display: flex; justify-content: center; color: #424b52; font-size: 12px; }
+.pw-secure { margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #59636b; font-size: 13px; font-weight: 500; line-height: 1.4; text-align: center; }
+.pw-secure b { color: #39434b; font-weight: 850; }
 .pw-legal { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; text-align: center; }
 .pw-error { margin: 0; padding: 11px 13px; border: 2px solid #9f2c2c; border-radius: 10px; background: #ffe7e7; color: #8c1d1d; font-size: 12px; }
 .pw-trust { display: grid; gap: 17px; padding: 25px 0 6px; border-top: 2px solid var(--ink); }
