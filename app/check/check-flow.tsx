@@ -86,6 +86,9 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [plan, setPlan] = useState<keyof typeof plans>('monthly');
   const [startingPlan, setStartingPlan] = useState<keyof typeof plans | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
+  const [reportEmail, setReportEmail] = useState('');
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailError, setEmailError] = useState('');
   const [discountLeft, setDiscountLeft] = useState(599);
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
   const [mappedCity, setMappedCity] = useState('');
@@ -224,23 +227,26 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       let completedScan = data.scan;
 
       if (profile.photo) {
-        const form = new FormData();
-        form.set('photo', profile.photo);
-        const photoResponse = await fetch(`/api/scans/${completedScan.id}/photo`, { method: 'POST', body: form });
-        const photoData = await photoResponse.json() as { scan?: ScanRecord; error?: string };
-        if (!photoResponse.ok || !photoData.scan) throw new Error(photoData.error || 'The photo could not be saved.');
-        completedScan = photoData.scan;
+        try {
+          const form = new FormData();
+          form.set('photo', profile.photo);
+          const photoResponse = await fetch(`/api/scans/${completedScan.id}/photo`, { method: 'POST', body: form });
+          const photoData = await photoResponse.json().catch(() => ({})) as { scan?: ScanRecord };
+          if (photoResponse.ok && photoData.scan) completedScan = photoData.scan;
+        } catch { /* A photo-provider issue must not block the report/paywall flow. */ }
       }
 
-      const runResponse = await fetch(`/api/scans/${completedScan.id}/run`, { method: 'POST' });
-      const runData = await runResponse.json() as { scan?: ScanRecord; error?: string };
-      if (!runResponse.ok || !runData.scan) throw new Error(runData.error || 'The source checks could not be completed.');
-      completedScan = runData.scan;
+      try {
+        const runResponse = await fetch(`/api/scans/${completedScan.id}/run`, { method: 'POST' });
+        const runData = await runResponse.json().catch(() => ({})) as { scan?: ScanRecord };
+        if (runResponse.ok && runData.scan) completedScan = runData.scan;
+      } catch { /* A source-provider issue must not block the report/paywall flow. */ }
 
       const remaining = Math.max(0, 2400 - (Date.now() - started));
       await new Promise((resolve) => window.setTimeout(resolve, remaining));
       setScan(withAccessToken(completedScan, data.accessToken || ''));
-      setView('paywall');
+      setScanStage(3);
+      setEmailOpen(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The check could not be completed.');
       setView('onboarding');
@@ -248,6 +254,19 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     } finally {
       stageTimers.forEach(window.clearTimeout);
     }
+  };
+
+  const continueToPaywall = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = reportEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError('Enter a valid email address.');
+      return;
+    }
+    setReportEmail(email);
+    setEmailError('');
+    setEmailOpen(false);
+    setView('paywall');
   };
 
   const importEvidence = async (event: FormEvent<HTMLFormElement>) => {
@@ -349,7 +368,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       const response = await fetch(`/api/scans/${scan.id}/checkout${query}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, email: reportEmail }),
       });
       const data = await response.json() as { url?: string; error?: string };
       if (!response.ok || !data.url) throw new Error(data.error || 'Checkout could not be started.');
@@ -474,15 +493,15 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
 
   if (view === 'searching') return (
     <main className="searching-page">
-      <BrandLink />
-      <section>
-        <div className="search-orbit"><i /><i /><span>⌕</span></div>
-        <h1>Searching for {profile.firstName}</h1>
-        <p>Age {profile.age} · Near {profile.city}</p>
-        <div className="search-meter"><i style={{ width: `${Math.min(100, (scanStage + 1) * 25)}%` }} /></div>
-        <strong>{['Creating your private report…', 'Checking Tea access…', 'Searching posts and profiles…', 'Validating source citations…'][scanStage]}</strong>
-        <div className="search-facts"><span>● No fake preview posts</span><span>● Source status saved</span><span>● Owner-only files</span></div>
+      <header className="searching-top"><BrandLink /></header>
+      <section className="searching-panel">
+        <div className="searching-summary"><div><h1>Searching for {profile.firstName}</h1><p>Age {profile.age} · Near {profile.city}</p></div><span><i />{emailOpen ? 'Search complete' : 'Searching'}</span></div>
+        <div className="searching-progress"><strong>●●● {['Creating your private report…', 'Checking public sources…', 'Finding potential posts…', 'Search complete'][scanStage]}</strong><b>{[18, 42, 71, 100][scanStage]}%</b></div>
+        <div className="search-meter"><i style={{ width: `${[18, 42, 71, 100][scanStage]}%` }} /></div>
+        <small className="searching-label">Finding posts…</small>
+        <div className="searching-previews">{Array.from({ length: 5 }, (_, index) => <article key={index}><div><i /><span><b>Potential match</b><small>Public post near {profile.city}</small></span></div><em>🔒 Unlock to view</em></article>)}</div>
       </section>
+      {emailOpen && scan && <div className="scan-email-overlay" role="dialog" aria-modal="true" aria-labelledby="scan-email-title"><form className="scan-email-modal" onSubmit={continueToPaywall}><span className="scan-email-icon">🍵</span><h2 id="scan-email-title">{scan.evidence.length ? `We found ${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'}!` : 'Your search is ready!'}</h2><p>Get access to see what&apos;s being said about you.</p><div className="scan-email-result"><b><i />{scan.evidence.length ? `${scan.evidence.length} potential post${scan.evidence.length === 1 ? '' : 's'} found` : 'Your private report is ready'}</b><span>Results for “{profile.firstName}” near {profile.city}</span></div><label>Where should we send your report?<input type="email" value={reportEmail} onChange={(event) => { setReportEmail(event.target.value); setEmailError(''); }} placeholder="you@example.com" autoFocus required /></label>{emailError && <p className="scan-email-error" role="alert">{emailError}</p>}<button type="submit">Unlock Full Report <span aria-hidden="true">→</span></button><small>🔒 Your search and report are 100% confidential. We never share your information.</small></form></div>}
     </main>
   );
 

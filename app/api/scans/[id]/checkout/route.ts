@@ -25,8 +25,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!scan) return session.attach(NextResponse.json({ error: 'Scan not found.' }, { status: 404 }));
     if (entitlementIsActive(scan)) return session.attach(NextResponse.json({ error: 'This report is already unlocked.', alreadyUnlocked: true }, { status: 409 }));
 
-    let plan = normalizePlan((await request.json().catch(() => ({}))).plan);
+    const body = await request.json().catch(() => ({})) as { plan?: unknown; email?: unknown };
+    let plan = normalizePlan(body.plan);
     plan ??= 'monthly';
+    const email = typeof body.email === 'string' ? body.email.trim().slice(0, 254) : '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return session.attach(NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 }));
+    }
     const priceId = priceIdForPlan(plan);
     if (!priceId) return session.attach(NextResponse.json({ error: 'Payments are not configured for this deployment yet.' }, { status: 503 }));
 
@@ -43,6 +48,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       client_reference_id: scanId,
       metadata: { scan_id: scanId, plan },
       subscription_data: { metadata: { scan_id: scanId, plan } },
+      ...(email ? { customer_email: email } : {}),
       success_url: `${origin}/report?${returnParams.toString()}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/report?${returnParams.toString()}&checkout=cancelled`,
     });

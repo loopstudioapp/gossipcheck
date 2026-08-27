@@ -38,7 +38,6 @@ CREATE INDEX IF NOT EXISTS source_runs_scan_idx ON source_runs(scan_id);
 CREATE INDEX IF NOT EXISTS source_runs_queue_idx ON source_runs(source, status, scan_id) WHERE status = 'queued';
 CREATE INDEX IF NOT EXISTS evidence_scan_idx ON evidence(scan_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS scan_photos_session_idx ON scan_photos(session_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS scans_subscription_idx ON scans(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL;
 `;
 
 let schemaReady: Promise<void> | undefined;
@@ -188,6 +187,7 @@ export async function ensureSchema() {
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS entitlement_plan TEXT').run();
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT').run();
     await db.prepare('ALTER TABLE scans ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT').run();
+    await db.prepare('CREATE INDEX IF NOT EXISTS scans_subscription_idx ON scans(stripe_subscription_id) WHERE stripe_subscription_id IS NOT NULL').run();
     await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'manual_import'").run();
     await db.prepare("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'GossipCheck'").run();
     await db.prepare('ALTER TABLE evidence ADD COLUMN IF NOT EXISTS external_id TEXT').run();
