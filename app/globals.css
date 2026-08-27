@@ -130,19 +130,19 @@ h1, h2 { font-family: Georgia, 'Times New Roman', serif; letter-spacing: -.055em
 .evidence-stats small { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 7px; }
 .evidence-card button { width: 100%; margin-top: 18px; padding: 12px; border: 1px solid var(--ink); border-radius: 7px; background: transparent; font-size: 11px; font-weight: 800; }
 
-.faq-section { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 50px 0 95px; }
-.faq-kicker { display: flex; align-items: center; gap: 24px; color: #277b43; font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 800; letter-spacing: .18em; }
+.faq-section { width: min(980px, calc(100% - 40px)); margin: 0 auto; padding: 40px 0 75px; }
+.faq-kicker { display: flex; align-items: center; gap: 20px; color: #277b43; font-family: var(--font-geist-mono), monospace; font-size: 10px; font-weight: 800; letter-spacing: .18em; }
 .faq-kicker i { display: block; height: 2px; flex: 1; background: var(--ink); }
-.faq-section > h2 { margin: 50px 0 58px; font-size: clamp(44px, 6vw, 76px); line-height: .94; font-weight: 600; }
+.faq-section > h2 { margin: 38px 0 42px; font-size: clamp(40px, 5vw, 64px); line-height: .96; font-weight: 600; }
 .faq-section > h2 em { background: linear-gradient(90deg, #25843d, #71bd53 42%, #e35e71); background-clip: text; -webkit-background-clip: text; color: transparent; font-weight: inherit; }
-.faq-list { display: grid; gap: 18px; }
-.faq-list details { border: 2px solid var(--ink); border-radius: 22px; background: var(--light); box-shadow: 5px 7px 0 var(--ink); overflow: hidden; }
-.faq-list summary { min-height: 108px; padding: 26px 30px 26px 34px; display: flex; align-items: center; justify-content: space-between; gap: 24px; list-style: none; cursor: pointer; font-family: Georgia, 'Times New Roman', serif; font-size: clamp(23px, 3vw, 34px); font-weight: 700; letter-spacing: -.035em; }
+.faq-list { display: grid; gap: 13px; }
+.faq-list details { border: 2px solid var(--ink); border-radius: 17px; background: var(--light); box-shadow: 4px 5px 0 var(--ink); overflow: hidden; }
+.faq-list summary { min-height: 84px; padding: 20px 24px 20px 27px; display: flex; align-items: center; justify-content: space-between; gap: 20px; list-style: none; cursor: pointer; font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; letter-spacing: -.025em; }
 .faq-list summary::-webkit-details-marker { display: none; }
-.faq-list summary span { position: relative; width: 52px; height: 52px; flex: 0 0 auto; border: 2px solid var(--ink); border-radius: 50%; background: #fff1c9; transition: transform .2s ease; }
-.faq-list summary span::before { content: ''; position: absolute; left: 18px; top: 16px; width: 11px; height: 11px; border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); transform: rotate(45deg); }
+.faq-list summary span { position: relative; width: 42px; height: 42px; flex: 0 0 auto; border: 2px solid var(--ink); border-radius: 50%; background: #fff1c9; transition: transform .2s ease; }
+.faq-list summary span::before { content: ''; position: absolute; left: 14px; top: 12px; width: 9px; height: 9px; border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); transform: rotate(45deg); }
 .faq-list details[open] summary span { transform: rotate(180deg); }
-.faq-list details > p { max-width: 920px; margin: -8px 90px 0 34px; padding: 0 0 30px; color: #4e595f; font-size: 16px; line-height: 1.65; }
+.faq-list details > p { max-width: 780px; margin: -3px 75px 0 27px; padding: 0 0 24px; color: #4e595f; font-size: 14px; line-height: 1.6; }
 
 .scan-section { width: min(1180px, calc(100% - 40px)); margin: 35px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 70px; align-items: center; padding: 75px; border: 2px solid var(--ink); border-radius: 24px; background: var(--blue); color: white; box-shadow: 8px 9px 0 var(--ink); }
 .scan-section h2 { margin-bottom: 0; }
@@ -203,14 +203,14 @@ footer div { display: flex; gap: 20px; }
   .sample-card { padding: 50px 24px; }
   .evidence-stack { min-height: 335px; }
   .evidence-card { padding: 21px; }
-  .faq-section { width: calc(100% - 28px); padding: 45px 0 70px; }
-  .faq-section > h2 { margin: 36px 0 42px; }
-  .faq-list { gap: 14px; }
-  .faq-list details { border-radius: 17px; box-shadow: 4px 5px 0 var(--ink); }
-  .faq-list summary { min-height: 88px; padding: 20px; font-size: 23px; }
-  .faq-list summary span { width: 44px; height: 44px; }
-  .faq-list summary span::before { left: 15px; top: 13px; }
-  .faq-list details > p { margin: -2px 20px 0; padding-bottom: 23px; font-size: 14px; }
+  .faq-section { width: calc(100% - 28px); padding: 36px 0 56px; }
+  .faq-section > h2 { margin: 30px 0 32px; }
+  .faq-list { gap: 11px; }
+  .faq-list details { border-radius: 14px; box-shadow: 3px 4px 0 var(--ink); }
+  .faq-list summary { min-height: 72px; padding: 16px 17px; font-size: 17px; }
+  .faq-list summary span { width: 36px; height: 36px; }
+  .faq-list summary span::before { left: 12px; top: 10px; width: 8px; height: 8px; }
+  .faq-list details > p { margin: -1px 17px 0; padding-bottom: 19px; font-size: 13px; }
   .scan-section { width: calc(100% - 28px); padding: 43px 23px; }
   .scan-form > div { display: grid; }
   footer { padding: 45px 0; flex-direction: column; gap: 25px; text-align: center; }
