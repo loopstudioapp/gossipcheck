@@ -10,6 +10,7 @@ import {
 } from '@stripe/react-stripe-js/checkout';
 import { loadStripe } from '@stripe/stripe-js';
 import type { StripeExpressCheckoutElementConfirmEvent } from '@stripe/stripe-js';
+import { trackMetaOnce } from '../../lib/meta';
 
 type EmbeddedPaymentProps = {
   scanId: string;
@@ -18,9 +19,9 @@ type EmbeddedPaymentProps = {
   onError: (message: string) => void;
 };
 
-type PaymentFormProps = Pick<EmbeddedPaymentProps, 'onError'>;
+type PaymentFormProps = Pick<EmbeddedPaymentProps, 'scanId' | 'email' | 'onError'>;
 
-function PaymentForm({ onError }: PaymentFormProps) {
+function PaymentForm({ scanId, email, onError }: PaymentFormProps) {
   const checkoutState = useCheckoutElements();
   const [cardOpen, setCardOpen] = useState(false);
   const [expressReady, setExpressReady] = useState(false);
@@ -37,24 +38,26 @@ function PaymentForm({ onError }: PaymentFormProps) {
     if (checkoutState.type !== 'success') return;
     setSubmitting(true);
     setMessage('');
+    trackMetaOnce(`initiate-checkout:${scanId}`, 'InitiateCheckout', { value: 29.99, currency: 'USD', content_name: 'GossipCheck monthly report' }, { email });
     const result = await checkoutState.checkout.confirm({ expressCheckoutConfirmEvent: event });
     if (result.type === 'error') {
       showError(result.error.message || 'Payment could not be completed. Please try again.');
       setSubmitting(false);
     }
-  }, [checkoutState, showError]);
+  }, [checkoutState, email, scanId, showError]);
 
   const confirmCard = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (checkoutState.type !== 'success') return;
     setSubmitting(true);
     setMessage('');
+    trackMetaOnce(`initiate-checkout:${scanId}`, 'InitiateCheckout', { value: 29.99, currency: 'USD', content_name: 'GossipCheck monthly report' }, { email });
     const result = await checkoutState.checkout.confirm();
     if (result.type === 'error') {
       showError(result.error.message || 'Payment could not be completed. Please try again.');
       setSubmitting(false);
     }
-  }, [checkoutState, showError]);
+  }, [checkoutState, email, scanId, showError]);
 
   if (checkoutState.type === 'loading') {
     return <div className="pw-payment-loading" role="status">Loading secure payment options…</div>;
@@ -158,7 +161,7 @@ export default function EmbeddedPayment({ scanId, accessToken, email, onError }:
 
   return (
     <CheckoutElementsProvider stripe={stripePromise} options={options}>
-      <PaymentForm onError={onError} />
+      <PaymentForm scanId={scanId} email={email} onError={onError} />
     </CheckoutElementsProvider>
   );
 }

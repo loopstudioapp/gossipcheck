@@ -4,6 +4,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
+import { clearMetaEmail, rememberMetaEmail, storedMetaEmail, trackMetaOnce } from '../../lib/meta';
 import EmbeddedPayment from './embedded-checkout';
 
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
@@ -280,6 +281,8 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
       const data = await response.json() as { saved?: boolean; error?: string };
       if (!response.ok || !data.saved) throw new Error(data.error || 'Your email could not be saved.');
       setReportEmail(email);
+      rememberMetaEmail(scan.id, email);
+      trackMetaOnce(`lead:${scan.id}`, 'Lead', { content_name: 'GossipCheck report' }, { email });
       setEmailOpen(false);
       setView('paywall');
     } catch (caught) {
@@ -406,9 +409,25 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     // Drop one-time checkout params from the address bar whichever way it resolved.
     const token = url.searchParams.get('access_token') || '';
     window.history.replaceState(null, '', `/report?scan_id=${encodeURIComponent(scan.id)}${token ? `&access_token=${encodeURIComponent(token)}` : ''}`);
-    if (outcome !== 'success' || scan.entitlement.status === 'active') return;
+    if (outcome !== 'success') return;
     const scanId = scan.id;
     const checkoutSessionId = url.searchParams.get('session_id') || '';
+    const trackVerifiedPurchase = () => {
+      const email = storedMetaEmail(scanId);
+      const sent = trackMetaOnce(`purchase:${checkoutSessionId || scanId}`, 'Purchase', {
+        value: 29.99,
+        currency: 'USD',
+        content_name: 'GossipCheck monthly report',
+      }, {
+        email,
+        eventId: `purchase_${checkoutSessionId || scanId}`,
+      });
+      if (sent) clearMetaEmail(scanId);
+    };
+    if (scan.entitlement.status === 'active') {
+      trackVerifiedPurchase();
+      return;
+    }
     let attempts = 0;
     let timer = 0;
     const verify = async () => {
@@ -421,6 +440,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         const data = await response.json() as { unlocked?: boolean };
         if (data.unlocked) {
           window.clearInterval(timer);
+          trackVerifiedPurchase();
           void fetch(`/api/scans/${scanId}/run`, { method: 'POST' }).catch(() => undefined);
           await loadScan(scanId, token);
           setView('report');
