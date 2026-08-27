@@ -33,6 +33,33 @@ function SourceLogo({ source }: { source: Source }) {
 
 const CheckIcon = () => <span className="check-icon" aria-hidden="true">✓</span>;
 
+const faqs = [
+  {
+    question: 'What platforms do you search?',
+    answer: 'We scan publicly available posts on dating review platforms and social media sites like Facebook, Twitter/X, and others where people share experiences and warnings about those they’ve dated.',
+  },
+  {
+    question: 'How does Gossip Checker work?',
+    answer: 'We scan publicly available content using your name, location, and other details to find if anyone has posted about you. Our AI matches profiles even with nicknames or variations.',
+  },
+  {
+    question: 'Do you also find social media posts?',
+    answer: 'Yes! Beyond dating apps, we scan public social media posts on Facebook, Twitter/X, and other platforms for mentions that may be about you based on your profile details.',
+  },
+  {
+    question: 'Is my search confidential?',
+    answer: '100% confidential. We don’t store your personal information, and your search is completely private. No one will know you checked.',
+  },
+  {
+    question: 'What information do I need to search?',
+    answer: 'Just your first name (or nickname), age, and the city/area where you’ve dated. Photos are optional but increase accuracy.',
+  },
+  {
+    question: 'How accurate are the results?',
+    answer: 'Our AI-powered matching achieves 94% accuracy. We use advanced algorithms to match names, locations, and physical descriptions across all platforms.',
+  },
+];
+
 export default function Home() {
   return (
     <main>
@@ -63,9 +90,9 @@ export default function Home() {
 
           <div className="hero-actions">
             <a className="button button-primary" href="/check">
-              Run a private scan <span aria-hidden="true">↗</span>
+              Check now <span aria-hidden="true">↗</span>
             </a>
-            <a className="text-link" href="#report">See a sample report <span aria-hidden="true">↓</span></a>
+            <a className="text-link" href="/check">Get your report in 3 min <span aria-hidden="true">→</span></a>
           </div>
 
           <div className="trust-row" aria-label="Product assurances">
@@ -182,6 +209,19 @@ export default function Home() {
               <button type="button">Open original source ↗</button>
             </article>
           </div>
+        </div>
+      </section>
+
+      <section className="faq-section" id="faq">
+        <div className="faq-kicker"><span>FAQ</span><i /></div>
+        <h2>Ask us <em>anything.</em></h2>
+        <div className="faq-list">
+          {faqs.map((faq) => (
+            <details key={faq.question}>
+              <summary>{faq.question}<span aria-hidden="true" /></summary>
+              <p>{faq.answer}</p>
+            </details>
+          ))}
         </div>
       </section>
 
