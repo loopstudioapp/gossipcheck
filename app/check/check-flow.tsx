@@ -9,7 +9,7 @@ import EmbeddedPayment from './embedded-checkout';
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
 
 const plans = {
-  monthly: { price: '$29.99', cycle: '/month', perDay: '$0.99/day', disclaimer: 'Your first month is $29.99 with the introductory discount. Your subscription then renews automatically at $59.99 per month until canceled. Cancel anytime.' },
+  monthly: { price: '$29.99', cycle: '/month', perDay: '$0.99/day' },
 } as const;
 
 const totalSteps = 11;
@@ -586,7 +586,12 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           <section className="pw-payment-card">
             <EmbeddedPayment scanId={scan.id} accessToken={typeof window === 'undefined' ? '' : new URL(window.location.href).searchParams.get('access_token') || ''} email={reportEmail} onError={setCheckoutError} />
             <p className="pw-secure"><span aria-hidden="true">🔒</span><span>Guaranteed <b>safe &amp; secure</b> checkout by Stripe</span></p>
-            <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
+            <p className="pw-legal">
+              We&apos;ve automatically applied a discount to your first subscription price. The subscription will automatically renew at $59.99/month unless canceled before the renewal date. Cancel anytime by emailing{' '}
+              <a href="mailto:support@teachecker.app">support@teachecker.app</a>. You agree to our{' '}
+              <a href="https://teachecker.app/terms" target="_blank" rel="noreferrer">Terms of Use</a> and{' '}
+              <a href="https://teachecker.app/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
+            </p>
           </section>
 
           <section className="pw-trust">

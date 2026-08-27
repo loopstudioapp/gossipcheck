@@ -883,6 +883,7 @@ body:has(.pw-page) { background: radial-gradient(circle at 8% 20%, rgba(174,255,
 .pw-secure { margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #59636b; font-size: 13px; font-weight: 500; line-height: 1.4; text-align: center; }
 .pw-secure b { color: #39434b; font-weight: 850; }
 .pw-legal { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; text-align: center; }
+.pw-legal a { color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .pw-error { margin: 0; padding: 11px 13px; border: 2px solid #9f2c2c; border-radius: 10px; background: #ffe7e7; color: #8c1d1d; font-size: 12px; }
 .pw-trust { display: grid; gap: 17px; padding: 25px 0 6px; border-top: 2px solid var(--ink); }
 .pw-trust h2 { margin: 0; text-align: center; font-size: 30px; letter-spacing: -.035em; }

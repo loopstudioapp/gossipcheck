@@ -71,7 +71,7 @@ function PaymentForm({ onError }: PaymentFormProps) {
           options={{
             buttonHeight: 54,
             buttonTheme: { applePay: 'black', googlePay: 'black' },
-            buttonType: { applePay: 'subscribe', googlePay: 'subscribe' },
+            buttonType: { applePay: 'plain', googlePay: 'plain' },
             layout: { maxColumns: 2, maxRows: 1, overflow: 'auto' },
             paymentMethodOrder: ['apple_pay', 'link', 'google_pay'],
             paymentMethods: { applePay: 'auto', link: 'auto', googlePay: 'auto' },
