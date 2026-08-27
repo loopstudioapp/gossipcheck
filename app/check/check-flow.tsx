@@ -4,6 +4,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
+import EmbeddedPayment from './embedded-checkout';
 
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
 
@@ -92,7 +93,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [postRefreshError, setPostRefreshError] = useState('');
   const [profileRefreshError, setProfileRefreshError] = useState('');
   const [plan] = useState<keyof typeof plans>('monthly');
-  const [startingPlan, setStartingPlan] = useState<keyof typeof plans | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
   const [reportEmail, setReportEmail] = useState('');
   const [emailOpen, setEmailOpen] = useState(false);
@@ -358,27 +358,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     window.location.assign('/check');
   };
 
-  const startCheckout = async () => {
-    if (!scan || startingPlan) return;
-    setStartingPlan(plan);
-    setCheckoutError('');
-    try {
-      const token = new URL(window.location.href).searchParams.get('access_token') || '';
-      const query = token ? `?access_token=${encodeURIComponent(token)}` : '';
-      const response = await fetch(`/api/scans/${scan.id}/checkout${query}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan, email: reportEmail }),
-      });
-      const data = await response.json() as { url?: string; error?: string };
-      if (!response.ok || !data.url) throw new Error(data.error || 'Checkout could not be started.');
-      window.location.assign(data.url);
-    } catch (caught) {
-      setCheckoutError(caught instanceof Error ? caught.message : 'Checkout could not be started.');
-      setStartingPlan(null);
-    }
-  };
-
   const openRecent = async (id: string) => {
     const token = new URL(window.location.href).searchParams.get('access_token') || '';
     if (await loadScan(id, token)) {
@@ -582,7 +561,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
                 </div>
                 <div className="pw-price-tag"><b>{plans[plan].perDay.replace('/day', '')}</b><span>per day</span><small>billed {plans[plan].price}{plans[plan].cycle}</small></div>
               </div>
-              <div className="pw-single-plan"><span>50% INTRO PRICE</span><b>$29.99 <small>first month</small></b><p>Then $59.99/month · cancel anytime</p></div>
               {checkoutError && <p className="pw-error" role="alert">{checkoutError}</p>}
             </div>
           </section>
@@ -590,7 +568,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
           <section className="pw-payment-card">
             <div className="pw-payment-heading"><span aria-hidden="true">S</span><div><b>Pay securely with Stripe</b><small>Stripe displays the real payment form and available payment methods.</small></div></div>
             <div className="pw-stripe-summary"><span>Due today</span><b>$29.99</b><small>Then $59.99/month until canceled</small></div>
-            <button className="pw-pay" type="button" onClick={() => void startCheckout()} disabled={startingPlan !== null}>{startingPlan ? 'Opening Stripe checkout…' : 'Continue to Stripe Checkout'} <span aria-hidden="true">→</span></button>
+            <EmbeddedPayment scanId={scan.id} accessToken={typeof window === 'undefined' ? '' : new URL(window.location.href).searchParams.get('access_token') || ''} email={reportEmail} onError={setCheckoutError} />
             <p className="pw-secure">🔒 Payment details are collected by Stripe, not GossipCheck.</p>
             <p className="pw-legal">{plans[plan].disclaimer} By providing your card information, you allow GossipCheck to charge your card for future payments in accordance with its Terms and Privacy Policy.</p>
           </section>
@@ -614,7 +592,6 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
             <span className="pw-private-pill">100% Anonymous &amp; Private</span>
             <p>Your search is confidential. We never share your details or notify anyone about your search.</p>
           </div>
-          <p className="pw-foot">Matches are leads to review, never proof. An empty search never invents posts.</p>
         </div>
       </main>
     );

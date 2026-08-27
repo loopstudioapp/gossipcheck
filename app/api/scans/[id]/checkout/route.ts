@@ -44,19 +44,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const checkout = await stripe()!.checkout.sessions.create({
       mode: 'subscription',
+      ui_mode: 'embedded',
       line_items: [{ price: priceId, quantity: 1 }],
       discounts: [{ coupon: process.env.STRIPE_INTRO_COUPON_ID! }],
       client_reference_id: scanId,
       metadata: { scan_id: scanId, plan },
       subscription_data: { metadata: { scan_id: scanId, plan } },
       ...(email ? { customer_email: email } : {}),
-      success_url: `${origin}/report?${returnParams.toString()}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/report?${returnParams.toString()}&checkout=cancelled`,
+      return_url: `${origin}/report?${returnParams.toString()}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     });
 
     await ensureSchema();
     await database().prepare('UPDATE scans SET entitlement_plan = COALESCE(entitlement_plan, ?) WHERE id = ?').bind(plan, scanId).run();
-    return session.attach(NextResponse.json({ url: checkout.url, plan }, { status: 201 }));
+    return session.attach(NextResponse.json({ clientSecret: checkout.client_secret, plan }, { status: 201 }));
   } catch (error) {
     console.error('Could not start checkout', error);
     return session.attach(NextResponse.json({ error: 'Checkout could not be started. Please try again.' }, { status: 500 }));

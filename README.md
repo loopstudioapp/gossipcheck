@@ -30,7 +30,7 @@ Copy `.env.example` to `.env.local`, configure `DATABASE_URL` and `BLOB_READ_WRI
 
 Reports unlock only after payment through Stripe Checkout:
 
-- Set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_MONTHLY`, and `STRIPE_INTRO_COUPON_ID` to enable the real Stripe Checkout. The monthly price renews at $59.99/month and the one-use introductory coupon reduces the first payment to $29.99. `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is reserved for future embedded components.
+- Set `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_PRICE_MONTHLY`, and `STRIPE_INTRO_COUPON_ID` to enable embedded Stripe Checkout. The monthly price renews at $59.99/month and the one-use introductory coupon reduces the first payment to $29.99.
 - While a scan has no active entitlement, every API response redacts evidence server-side — paywall tiles receive ids, kinds, and confidence but no titles, text, links, images, or comments. Refresh/import/dismiss endpoints return 403 until the report is unlocked.
 - `POST /api/scans/{id}/checkout` creates a subscription Checkout Session for the chosen price and redirects the customer to Stripe. Scan id, plan, and report-access token travel in session metadata and the success URL.
 - `POST /api/webhooks/stripe` verifies the `stripe-signature` header against `STRIPE_WEBHOOK_SECRET`, claims each event id exactly once in a `stripe_events` table for idempotency, grants the entitlement on `checkout.session.completed`, and expires it on `customer.subscription.deleted`.
