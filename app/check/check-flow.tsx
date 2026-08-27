@@ -213,7 +213,11 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   };
 
   const runSearch = async () => {
-    const simulatedMatchCount = Math.floor(Math.random() * 6) + 5;
+    const previousMatchCount = Number(window.sessionStorage.getItem('gossipcheck-preview-count'));
+    const availableMatchCounts = [5, 6, 7, 8, 9, 10].filter((count) => count !== previousMatchCount);
+    const randomIndex = window.crypto.getRandomValues(new Uint32Array(1))[0] % availableMatchCounts.length;
+    const simulatedMatchCount = availableMatchCounts[randomIndex];
+    window.sessionStorage.setItem('gossipcheck-preview-count', String(simulatedMatchCount));
     setPreviewMatchCount(simulatedMatchCount);
     setView('searching');
     setScanProgress(0);
