@@ -669,8 +669,8 @@ footer div { display: flex; gap: 20px; }
 .searching-page,
 .report-page { background: var(--paper); color: var(--ink); }
 
-.funnel-page { height: 100svh; padding: 18px; place-items: stretch center; overflow: hidden; background: radial-gradient(circle at 8% 8%, rgba(185,244,95,.42), transparent 27%), radial-gradient(circle at 92% 72%, rgba(56,88,233,.17), transparent 30%), radial-gradient(circle at 65% 7%, rgba(255,116,110,.14), transparent 24%), var(--paper); grid-template-rows: none; grid-template-columns: none; }
-.funnel-shell { width: min(720px, 100%); height: calc(100svh - 36px); min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; border: 2px solid var(--ink); border-radius: 18px; background: var(--paper); box-shadow: 9px 10px 0 var(--ink); overflow: hidden; }
+.funnel-page { min-height: 100svh; height: auto; padding: 18px; place-items: stretch center; overflow-x: hidden; overflow-y: auto; background: radial-gradient(circle at 8% 8%, rgba(185,244,95,.42), transparent 27%), radial-gradient(circle at 92% 72%, rgba(56,88,233,.17), transparent 30%), radial-gradient(circle at 65% 7%, rgba(255,116,110,.14), transparent 24%), var(--paper); grid-template-rows: none; grid-template-columns: none; }
+.funnel-shell { width: min(720px, 100%); min-height: calc(100svh - 36px); height: auto; display: grid; grid-template-rows: auto auto auto minmax(min-content, 1fr) auto; border: 2px solid var(--ink); border-radius: 18px; background: var(--paper); box-shadow: 9px 10px 0 var(--ink); overflow: hidden; }
 .funnel-header { width: 100%; height: 76px; padding: 0 18px; border-bottom: 2px solid var(--ink); }
 .funnel-header > button { width: 42px; height: 42px; border: 1.5px solid var(--ink); background: var(--light); box-shadow: 2px 2px 0 var(--ink); font-size: 17px; font-weight: 900; }
 .funnel-header > div { color: var(--ink); font-family: var(--font-geist-mono), monospace; }
@@ -683,9 +683,9 @@ footer div { display: flex; gap: 20px; }
 .funnel-progress i { height: 100%; border-radius: inherit; background: var(--blue); box-shadow: 5px 0 0 var(--lime); }
 .funnel-status { width: 100%; padding: 8px 18px 0; color: var(--ink); font-weight: 800; }
 .funnel-status span:last-child { color: var(--lime-deep); }
-.funnel-main { width: 100%; min-height: 0; margin: 0; padding: 16px 28px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.funnel-main { width: 100%; min-height: 0; margin: 0; padding: 28px; display: flex; flex-direction: column; justify-content: center; overflow: visible; }
 .funnel-step { width: 100%; }
-.fit-wrap { width: 100%; transform-origin: center center; }
+.fit-wrap { width: 100%; }
 .funnel-step { text-align: left; animation: funnel-step-in .28s ease both; }
 .step-emoji { width: 58px; height: 54px; margin: 0; border: 2px solid var(--ink); border-radius: 13px; background: var(--lime); box-shadow: 4px 4px 0 var(--ink); font-size: 25px; }
 .funnel-step h1 { max-width: 650px; margin: 18px 0 8px; color: var(--ink); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(42px, 5.2vw, 56px); font-weight: 600; line-height: .94; letter-spacing: -.055em; }
@@ -716,6 +716,8 @@ footer div { display: flex; gap: 20px; }
 .location-search button span { margin-left: 8px; color: var(--lime); }
 .location-search button:disabled { opacity: .5; cursor: not-allowed; }
 .location-help { margin: 14px 0 0; color: var(--muted); font-size: 11px; }
+.location-help.detected { color: #4f7f26; font-weight: 700; }
+.location-help.denied, .location-help.unavailable { color: #9f514b; }
 .funnel-map.map-placeholder { margin-top: 19px; }
 .funnel-map.has-map { position: relative; min-height: 280px; margin-top: 19px; display: block; background: #dcebd5; overflow: hidden; }
 .funnel-map.has-map iframe { width: 100%; height: 280px; display: block; border: 0; }
@@ -1008,8 +1010,8 @@ body:has(.pw-page) { background: #ffffff; }
 }
 
 @media (max-width: 650px) {
-  .funnel-page { height: 100svh; padding: 0; background: var(--paper); }
-  .funnel-shell { width: 100%; height: 100svh; border: 0; border-radius: 0; box-shadow: none; }
+  .funnel-page { min-height: 100svh; height: auto; padding: 0; background: var(--paper); }
+  .funnel-shell { width: 100%; min-height: 100svh; height: auto; border: 0; border-radius: 0; box-shadow: none; }
   .funnel-header { width: 100%; height: 66px; padding: 0 15px; }
   .funnel-header > button { width: 38px; height: 38px; box-shadow: 2px 2px 0 var(--ink); }
   .funnel-header .brand-mark { display: inline-block; transform: scale(.86); transform-origin: right center; margin-right: 3px; }
@@ -1062,7 +1064,7 @@ body:has(.pw-page) { background: #ffffff; }
   .profile-coverage b { font-size: 21px; }
 }
 
-/* Compact-height tiers: every funnel step stays inside the viewport, no scrolling */
+/* Compact-height tiers keep controls comfortable while the page scrolls naturally. */
 @media (max-height: 780px) {
   .funnel-header { height: 60px; }
   .step-emoji { width: 48px; height: 44px; font-size: 21px; box-shadow: 3px 3px 0 var(--ink); }

@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { EvidenceRecord, ScanRecord } from '../../lib/backend-types';
 
 type AppView = 'onboarding' | 'searching' | 'paywall' | 'report';
@@ -87,14 +87,14 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
   const [startingPlan, setStartingPlan] = useState<keyof typeof plans | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
   const [discountLeft, setDiscountLeft] = useState(599);
-  const [fitScale, setFitScale] = useState(1);
-  const mainRef = useRef<HTMLElement>(null);
-  const stepRef = useRef<HTMLDivElement>(null);
   const [profile, setProfile] = useState({ firstName: '', age: '', city: '', instagram: '', experiences: [] as string[], photo: null as File | null, faceConsent: false });
   const [mappedCity, setMappedCity] = useState('');
+  const [mapCenter, setMapCenter] = useState('');
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'detecting' | 'detected' | 'denied' | 'unavailable'>('idle');
   const ageIsValid = Number.isInteger(Number(profile.age)) && Number(profile.age) >= 18 && Number(profile.age) <= 99;
   const canContinue = step === 1 ? Boolean(profile.firstName.trim()) : step === 2 ? ageIsValid : step === 3 ? Boolean(mappedCity && mappedCity === profile.city.trim()) : step === 11 ? !profile.photo || profile.faceConsent : true;
-  const mapUrl = mappedCity ? `https://www.google.com/maps?q=${encodeURIComponent(mappedCity)}&output=embed` : '';
+  const mapQuery = mapCenter || mappedCity;
+  const mapUrl = mapQuery ? `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}&output=embed` : '';
 
   // The single-scan endpoint is authoritative: it returns full evidence for paid
   // reports and redacted stubs otherwise. History-list entries are always redacted.
@@ -144,32 +144,44 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     return () => window.clearInterval(timer);
   }, [discountLeft]);
 
-  useEffect(() => {
-    const stepEl = stepRef.current;
-    const mainEl = mainRef.current;
-    if (view !== 'onboarding' || !stepEl || !mainEl) return;
-    const measure = () => {
-      const previous = stepEl.style.transform;
-      stepEl.style.transform = 'none';
-      const natural = stepEl.scrollHeight;
-      stepEl.style.transform = previous;
-      const available = mainEl.clientHeight;
-      setFitScale(natural > available ? Math.max(0.55, available / natural) : 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(stepEl);
-    window.addEventListener('resize', measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [step, view]);
-
   const update = <K extends keyof typeof profile>(key: K, value: typeof profile[K]) => {
     setProfile((current) => ({ ...current, [key]: value }));
     setError('');
   };
+
+  useEffect(() => {
+    if (view !== 'onboarding' || step !== 3 || locationStatus !== 'idle') return;
+    if (!navigator.geolocation) {
+      setLocationStatus('unavailable');
+      return;
+    }
+
+    setLocationStatus('detecting');
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      const latitude = coords.latitude.toFixed(5);
+      const longitude = coords.longitude.toFixed(5);
+      setMapCenter(`${latitude},${longitude}`);
+
+      try {
+        const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
+        if (!response.ok) throw new Error('Location lookup failed.');
+        const result = await response.json() as { city?: string; locality?: string; principalSubdivision?: string; countryName?: string };
+        const placeParts = [result.city || result.locality, result.principalSubdivision].filter((part): part is string => Boolean(part));
+        const detectedCity = [...new Set(placeParts)].join(', ') || result.countryName || '';
+        if (detectedCity) {
+          setProfile((current) => ({ ...current, city: detectedCity }));
+          setMappedCity(detectedCity);
+          setLocationStatus('detected');
+        } else {
+          setLocationStatus('unavailable');
+        }
+      } catch {
+        setLocationStatus('unavailable');
+      }
+    }, (locationError) => {
+      setLocationStatus(locationError.code === locationError.PERMISSION_DENIED ? 'denied' : 'unavailable');
+    }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
+  }, [locationStatus, step, view]);
 
   const next = () => {
     if (step === 1 && !profile.firstName.trim()) return setError('Enter the name or nickname you use while dating.');
@@ -186,6 +198,7 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
     if (query.length < 2) return;
     update('city', query);
     setMappedCity(query);
+    setMapCenter(query);
   };
 
   const runSearch = async () => {
@@ -434,11 +447,11 @@ export default function CheckFlow({ initialView = 'onboarding' }: { initialView?
         <div className="funnel-progress" aria-label={`Step ${step} of ${totalSteps}`}><i style={{ width: `${step / totalSteps * 100}%` }} /></div>
         <div className="funnel-status"><span>Step {step}</span><span>● Private self-search</span></div>
 
-        <section className="funnel-main" key={step} ref={mainRef}>
-          <div className="fit-wrap" ref={stepRef} style={fitScale < 1 ? { transform: `scale(${fitScale})` } : undefined}>
+        <section className="funnel-main" key={step}>
+          <div className="fit-wrap">
           {step === 1 && <FunnelStep icon="👋" title="What’s your first name?" subtitle="Or the name or nickname you use on dating apps."><input autoFocus value={profile.firstName} onChange={(event) => update('firstName', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} placeholder="Enter your first name" /><Tip>We will compare common variations without publishing your search.</Tip></FunnelStep>}
           {step === 2 && <FunnelStep icon="🎂" title="How old are you?" subtitle="Age helps separate people who share the same name."><input autoFocus value={profile.age} onChange={(event) => update('age', event.target.value)} onKeyDown={(event) => event.key === 'Enter' && next()} type="number" min="18" max="99" placeholder="Your age" /><Tip>GossipCheck only supports self-searches by adults.</Tip></FunnelStep>}
-          {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><div className="location-search"><input autoFocus value={profile.city} onChange={(event) => { update('city', event.target.value); setMappedCity(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); showLocationMap(); } }} placeholder="Search for a city or area…" /><button type="button" onClick={showLocationMap} disabled={profile.city.trim().length < 2}>Show map <span>→</span></button></div><p className="location-help">Enter a city, then confirm it to center the map.</p>{mappedCity ? <div className="funnel-map has-map"><iframe title={`Map centered on ${mappedCity}`} src={mapUrl} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="map-location"><span>●</span><b>{mappedCity}</b></div><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mappedCity)}`} target="_blank" rel="noreferrer">Open in Google Maps ↗</a></div> : <div className="funnel-map map-placeholder"><span>◎</span><b>{profile.city || 'Your search area'}</b><small>The real map appears after you confirm the area.</small></div>}<Tip>Your city query is sent to Google Maps only when you select “Show map.” It is used to center the map and rank possible matches.</Tip></FunnelStep>}
+          {step === 3 && <FunnelStep icon="📍" title="Where do you date?" subtitle="The city or area where you have been active on dating apps."><div className="location-search"><input autoFocus value={profile.city} onChange={(event) => { update('city', event.target.value); setMappedCity(''); setMapCenter(''); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); showLocationMap(); } }} placeholder={locationStatus === 'detecting' ? 'Detecting your location…' : 'Search for a city or area…'} /><button type="button" onClick={showLocationMap} disabled={profile.city.trim().length < 2}>Show map <span>→</span></button></div><p className={`location-help ${locationStatus}`}>{locationStatus === 'detecting' ? 'Allow location access to center the map automatically.' : locationStatus === 'detected' ? `Location detected as ${mappedCity}. You can type a different city.` : locationStatus === 'denied' ? 'Location access was declined. Enter a city to continue.' : locationStatus === 'unavailable' ? 'We could not name your location automatically. Enter a city to continue.' : 'Enter a city, then confirm it to center the map.'}</p>{mapUrl ? <div className="funnel-map has-map"><iframe title={`Map centered on ${mappedCity || 'your current location'}`} src={mapUrl} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><div className="map-location"><span>●</span><b>{mappedCity || 'Your current location'}</b></div><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`} target="_blank" rel="noreferrer">Open in Google Maps ↗</a></div> : <div className="funnel-map map-placeholder"><span>◎</span><b>{locationStatus === 'detecting' ? 'Finding you…' : profile.city || 'Your search area'}</b><small>{locationStatus === 'detecting' ? 'The map will appear as soon as your browser shares your location.' : 'The map appears automatically when location access is available.'}</small></div>}<Tip>With your permission, your browser location is used to center Google Maps and a location service names the nearby city. You can replace it with a different dating area at any time.</Tip></FunnelStep>}
           {step === 4 && <FunnelStep icon="📡" title={`What’s happening near ${profile.city || 'you'}`} subtitle="Source coverage updates as new posts appear — here is what your report keeps watch on."><div className="activity-card"><div className="activity-head"><span aria-hidden="true">📍</span><b>Tea is active in your area</b><i><b className="pulse-dot">●</b> Live coverage</i></div><div className="activity-row"><span aria-hidden="true">📝</span><div><b>New posts daily</b><small>Tea reviews and public posts are added continuously.</small></div></div><div className="activity-row"><span aria-hidden="true">🔍</span><div><b>Searchable for years</b><small>Old mentions resurface in name and username searches.</small></div></div><div className="activity-row"><span aria-hidden="true">⏰</span><div><b>Screenshots circulate</b><small>Copies can outlive the original post.</small></div></div><p className="activity-foot">Coverage refreshes in real time while your sources are checked.</p></div><Tip>AI helps discover sources. It cannot verify that a post or profile is about you.</Tip></FunnelStep>}
           {step === 5 && <FunnelStep icon="👀" title="Here’s what’s at stake…" subtitle="Anonymous posts can quietly shape how people treat you, long before you ever find out."><div className="stake-grid"><article><span aria-hidden="true">👀</span><b>Checked before dates</b><p>Names get looked up before a first meeting.</p></article><article><span aria-hidden="true">📱</span><b>Shared in private</b><p>Posts travel through group chats you never see.</p></article><article><span aria-hidden="true">💔</span><b>Without your knowledge</b><p>Most people never learn they were posted about.</p></article></div><p className="stake-note"><b>🤔 Think about it:</b>&nbsp;one anonymous post can outlast the relationship that inspired it.</p><Tip>A match is a lead to review, never proof that a claim is true.</Tip></FunnelStep>}
           {step === 6 && <FunnelStep icon="🤔" title="Has this ever happened to you?" subtitle="Select any experiences that resonate. This is optional and is not sent to source providers."><div className="choice-list">{experiences.map(([icon, label]) => <button className={profile.experiences.includes(label) ? 'selected' : ''} type="button" key={label} onClick={() => update('experiences', profile.experiences.includes(label) ? profile.experiences.filter((item) => item !== label) : [...profile.experiences, label])}><span>{icon}</span>{label}<i>{profile.experiences.includes(label) ? '✓' : '+'}</i></button>)}</div><Tip>You cannot control what is posted, but you can document and review what you find.</Tip></FunnelStep>}
